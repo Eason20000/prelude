@@ -100,6 +100,7 @@ class MidiEngine(GObject.GObject):
 
     def pause(self):
         if self._state == self.STATE_PLAYING:
+            self._all_notes_off()
             self._pause_ev.clear()
             self._set_state(self.STATE_PAUSED)
 
@@ -116,6 +117,7 @@ class MidiEngine(GObject.GObject):
         self._pause_ev.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
+        self._all_notes_off()
         self._current_time = 0.0
         self._seek_position = 0.0
         self._set_state(self.STATE_STOPPED)
@@ -217,7 +219,6 @@ class MidiEngine(GObject.GObject):
                         )
                         return
 
-                self._current_time += msg.time
                 self._emit_position()
 
         except Exception as e:
@@ -270,6 +271,13 @@ class MidiEngine(GObject.GObject):
             self._current_time,
             self._total_length,
         )
+
+    def _all_notes_off(self):
+        if self._port is None:
+            return
+        for ch in range(16):
+            self._port.send(mido.Message("control_change", channel=ch, control=123, value=0))
+            self._port.send(mido.Message("control_change", channel=ch, control=120, value=0))
 
     def _emit_signal(self, name: str, *args):
         GLib.idle_add(self.emit, name, *args)

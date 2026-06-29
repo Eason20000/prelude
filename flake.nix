@@ -27,18 +27,30 @@
         build-system = [ pythonPkgs.hatchling ];
 
         dependencies = with pythonPkgs; [
-          # Python dependencies
           mido
           python-rtmidi
           pygobject3
         ];
 
+        nativeBuildInputs = with pkgs; [
+          wrapGAppsHook4
+          gobject-introspection
+        ];
+
         buildInputs = with pkgs; [
-          # Non Python dependencies
           gtk4
           libadwaita
-          wrapGAppsHook4
         ];
+
+        dontWrapGApps = true;
+
+        postInstall = ''
+          cp -r ui $out/${pythonPkgs.python.sitePackages}/prelude/
+        '';
+
+        preFixup = ''
+          makeWrapperArgs+=("''${gappsWrapperArgs[@]}")
+        '';
       };
 
       devShells.default = pkgs.mkShell {

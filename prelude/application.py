@@ -18,6 +18,10 @@ class PreludeApplication(Adw.Application):
         self.engine = MidiEngine()
         self._connect_engine_signals()
 
+        self._setup_actions()
+        self._setup_file_filters()
+        self._setup_about()
+
     # ── engine signals ─────────────────────────────────────────
 
     def _connect_engine_signals(self):
@@ -43,6 +47,7 @@ class PreludeApplication(Adw.Application):
     def _on_file_loaded(self, _engine, filename, length):
         self._label_name.set_text(filename)
         self._update_progress(0.0, length)
+        self._main_stack.set_visible_child_name("main-view")
 
     def _on_error(self, _engine, message):
         toast = Adw.Toast.new(message)
@@ -57,13 +62,30 @@ class PreludeApplication(Adw.Application):
         builder.add_from_file(str(ui_path))
 
         self._toast_overlay = builder.get_object("toast_overlay")
+        self._main_stack = builder.get_object("main_stack")
+        self._info_sheet = builder.get_object("info_sheet")
+        self._label_info = builder.get_object("label_info")
         self._label_name = builder.get_object("label_name")
         self._label_position = builder.get_object("label_position")
-        self._label_length = builder.get_object("label_legth")
+        self._label_length = builder.get_object("label_length")
         self._progress_bar = builder.get_object("progress_bar")
+
+        btn_info = builder.get_object("button_info")
+        btn_info.connect("clicked", self._on_show_info)
+
+        btn_info_close = builder.get_object("button_info_close")
+        btn_info_close.connect("clicked", lambda _b: self._info_sheet.set_open(False))
 
         btn_open = builder.get_object("button_open")
         btn_open.connect("clicked", self._on_open)
+
+        self._port_model = Gtk.StringList.new([])
+        self._port_dropdown = Gtk.DropDown(
+            model=self._port_model, enable_search=False
+        )
+        self._port_dropdown.connect(
+            "notify::selected", self._on_port_selected
+        )
 
         self._btn_start_stop = builder.get_object(
             "button_start_stop"
@@ -78,56 +100,26 @@ class PreludeApplication(Adw.Application):
         btn_forward = builder.get_object("button_forward")
         btn_forward.connect("clicked", self._on_forward)
 
-        btn_menu = builder.get_object("button_menu")
-        btn_menu.connect("clicked", self._on_menu)
-
-        self._setup_port_selector(builder)
-        self._setup_file_filters()
-        self._setup_about()
-        self._setup_keyboard_shortcuts()
+        btn_stop = builder.get_object("button_stop")
+        btn_stop.connect("clicked", lambda _b: self.engine.stop())
 
         self.win = builder.get_object("window_main")
         self.win.set_application(self)
+
+        self._setup_keyboard_shortcuts()
+
         self.win.present()
 
         self._refresh_ports()
 
-    # ── UI setup helpers ────────────────────────────────────────
+    def _setup_actions(self):
+        about_action = Gio.SimpleAction.new("about", None)
+        about_action.connect("activate", lambda *_: self._on_menu())
+        self.add_action(about_action)
 
-    def _setup_port_selector(self, builder):
-        self._port_model = Gtk.StringList.new([])
-        self._port_dropdown = Gtk.DropDown(
-            model=self._port_model,
-            enable_search=False,
-            hexpand=True,
-        )
-        self._port_dropdown.connect(
-            "notify::selected", self._on_port_selected
-        )
-
-        self._btn_refresh = Gtk.Button(
-            icon_name="view-refresh-symbolic",
-            tooltip_text="Refresh MIDI ports",
-        )
-        self._btn_refresh.connect(
-            "clicked", lambda _b: self._refresh_ports()
-        )
-
-        label = Gtk.Label(label="MIDI Output:")
-        row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=6,
-            margin_top=6,
-            margin_start=12,
-            margin_end=12,
-            margin_bottom=6,
-        )
-        row.append(label)
-        row.append(self._port_dropdown)
-        row.append(self._btn_refresh)
-
-        content_box = self._label_name.get_parent().get_parent()
-        content_box.prepend(row)
+        port_action = Gio.SimpleAction.new("port-settings", None)
+        port_action.connect("activate", lambda *_: self._on_port_settings())
+        self.add_action(port_action)
 
     def _setup_file_filters(self):
         self._dialog_file = Gtk.FileDialog.new()
@@ -161,8 +153,8 @@ class PreludeApplication(Adw.Application):
                 lambda *_: self.engine.toggle_play_pause()
             ),
         )
-        shortcuts.append(space)
-        self.add_controller(shortcuts)
+        shortcuts.add_shortcut(space)
+        self.win.add_controller(shortcuts)
 
     # ── file dialog ─────────────────────────────────────────────
 
@@ -188,10 +180,46 @@ class PreludeApplication(Adw.Application):
     def _on_forward(self, _button):
         pass
 
-    # ── about ───────────────────────────────────────────────────
+    # ── info sheet ──────────────────────────────────────────────
 
-    def _on_menu(self, _button):
-        self._dialog_about.present(self.win)
+    def _on_show_info(self, _button):
+        self._label_info.set_label(
+            f"File: {self._label_name.get_text()}\n"
+            f"Length: {self._label_length.get_text()}\n"
+            f"MIDI format: ?\nTracks: ?"
+        )
+        self._info_sheet.set_open(True)
+
+    # ── menu ────────────────────────────────────────────────────
+
+    def _on_menu(self):
+        win = self.get_active_window()
+        if win is not None:
+            self._dialog_about.present(win)
+
+    def _on_port_settings(self):
+        win = self.get_active_window()
+        if win is None:
+            return
+        dialog = Adw.AlertDialog(
+            title="Port settings",
+            body="Select MIDI output port:",
+        )
+
+        refresh_btn = Gtk.Button(
+            icon_name="view-refresh-symbolic",
+            tooltip_text="Refresh ports",
+        )
+        refresh_btn.connect("clicked", lambda _b: self._refresh_ports())
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.append(self._port_dropdown)
+        box.append(refresh_btn)
+
+        dialog.set_extra_child(box)
+        dialog.add_response("close", "Close")
+        dialog.set_default_response("close")
+        dialog.present(win)
 
     # ── progress ────────────────────────────────────────────────
 
@@ -251,14 +279,7 @@ class PreludeApplication(Adw.Application):
 
     @staticmethod
     def _find_ui_file(name: str) -> Path:
-        here = Path(__file__).resolve().parent.parent
-        candidate = here / "ui" / name
-        if candidate.exists():
-            return candidate
-        candidate = here / "share" / "prelude" / "ui" / name
-        if candidate.exists():
-            return candidate
-        return Path(sys.argv[0]).resolve().parent / "ui" / name
+        return Path(__file__).resolve().parent / "ui" / name
 
 
 GTK_INVALID_LIST_ITEM = getattr(Gtk, 'INVALID_LIST_ITEM', 0xFFFFFFFF)
