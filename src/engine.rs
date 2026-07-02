@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use midly::{MidiMessage, MetaMessage, Timing, TrackEventKind};
 use midir::{MidiOutput, MidiOutputConnection};
+use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
 
 /// A MIDI event that can be sent to a port.
 #[derive(Debug, Clone)]
@@ -60,10 +60,9 @@ impl MidiEngine {
     pub(crate) fn load(&mut self, path: &str) -> Result<String, String> {
         self.stop();
 
-        let data = std::fs::read(path)
-            .map_err(|e| format!("Failed to read file: {e}"))?;
-        let smf = midly::Smf::parse(&data)
-            .map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
+        let data = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
+        let smf =
+            midly::Smf::parse(&data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
         let (events, total_length) = Self::flatten(&smf);
 
         let file_name = std::path::Path::new(path)
@@ -158,7 +157,9 @@ impl MidiEngine {
             return Vec::new();
         };
 
-        let new_elapsed = Instant::now().saturating_duration_since(start).as_secs_f64();
+        let new_elapsed = Instant::now()
+            .saturating_duration_since(start)
+            .as_secs_f64();
         let mut due = Vec::new();
 
         // Advance through events that are due
@@ -215,16 +216,16 @@ impl MidiEngine {
     pub(crate) fn open_port(&mut self, name: &str) -> Result<(), String> {
         self.port = None;
 
-        let midi = MidiOutput::new("prelude")
-            .map_err(|e| format!("Failed to create MIDI output: {e}"))?;
+        let midi =
+            MidiOutput::new("prelude").map_err(|e| format!("Failed to create MIDI output: {e}"))?;
 
         let ports = midi.ports();
         let port = ports
             .iter()
             .find_map(|p| {
-                midi.port_name(p).ok().and_then(|n| {
-                    (n == name).then_some(p)
-                })
+                midi.port_name(p)
+                    .ok()
+                    .and_then(|n| (n == name).then_some(p))
             })
             .ok_or_else(|| format!("Port not found: {name}"))?;
 
@@ -325,10 +326,7 @@ impl MidiEngine {
     fn seconds_for_tick(tick: u64, tpq: u16, tempo_map: &[(u64, u32)]) -> f64 {
         let mut secs = 0.0_f64;
         let mut last_tick = 0u64;
-        let mut cur_tempo = tempo_map
-            .first()
-            .map(|&(_, us)| us)
-            .unwrap_or(500_000) as f64;
+        let mut cur_tempo = tempo_map.first().map(|&(_, us)| us).unwrap_or(500_000) as f64;
 
         for &(t, us) in tempo_map {
             if t >= tick {
@@ -347,9 +345,7 @@ impl MidiEngine {
         if tpq == 0 {
             return 0.0;
         }
-        delta_ticks as f64
-            * (tempo_us_per_quarter / 1_000_000.0)
-            / tpq as f64
+        delta_ticks as f64 * (tempo_us_per_quarter / 1_000_000.0) / tpq as f64
     }
 }
 
@@ -399,23 +395,53 @@ fn midi_message_to_event(channel: u8, message: &MidiMessage) -> Option<MidiEvent
 /// Encode a MidiEvent into raw MIDI bytes for sending via midir.
 pub(crate) fn encode_event(ev: &MidiEvent) -> Vec<u8> {
     match ev {
-        MidiEvent::NoteOn { channel, key, velocity } => encode_note_on(*channel, *key, *velocity),
-        MidiEvent::NoteOff { channel, key, velocity } => encode_note_off(*channel, *key, *velocity),
-        MidiEvent::ControlChange { channel, control, value } => encode_cc(*channel, *control, *value),
+        MidiEvent::NoteOn {
+            channel,
+            key,
+            velocity,
+        } => encode_note_on(*channel, *key, *velocity),
+        MidiEvent::NoteOff {
+            channel,
+            key,
+            velocity,
+        } => encode_note_off(*channel, *key, *velocity),
+        MidiEvent::ControlChange {
+            channel,
+            control,
+            value,
+        } => encode_cc(*channel, *control, *value),
         MidiEvent::ProgramChange { channel, program } => encode_program_change(*channel, *program),
         MidiEvent::PitchBend { channel, value } => encode_pitch_bend(*channel, *value),
-        MidiEvent::Aftertouch { channel, key, pressure } => encode_aftertouch(*channel, *key, *pressure),
-        MidiEvent::ChannelPressure { channel, pressure } => encode_channel_pressure(*channel, *pressure),
+        MidiEvent::Aftertouch {
+            channel,
+            key,
+            pressure,
+        } => encode_aftertouch(*channel, *key, *pressure),
+        MidiEvent::ChannelPressure { channel, pressure } => {
+            encode_channel_pressure(*channel, *pressure)
+        }
         MidiEvent::Sysex(bytes) => bytes.clone(),
     }
 }
 
-fn encode_note_on(ch: u8, key: u8, vel: u8) -> Vec<u8> { vec![0x90 | ch, key, vel] }
-fn encode_note_off(ch: u8, key: u8, vel: u8) -> Vec<u8> { vec![0x80 | ch, key, vel] }
-fn encode_cc(ch: u8, control: u8, value: u8) -> Vec<u8> { vec![0xB0 | ch, control, value] }
-fn encode_program_change(ch: u8, program: u8) -> Vec<u8> { vec![0xC0 | ch, program] }
+fn encode_note_on(ch: u8, key: u8, vel: u8) -> Vec<u8> {
+    vec![0x90 | ch, key, vel]
+}
+fn encode_note_off(ch: u8, key: u8, vel: u8) -> Vec<u8> {
+    vec![0x80 | ch, key, vel]
+}
+fn encode_cc(ch: u8, control: u8, value: u8) -> Vec<u8> {
+    vec![0xB0 | ch, control, value]
+}
+fn encode_program_change(ch: u8, program: u8) -> Vec<u8> {
+    vec![0xC0 | ch, program]
+}
 fn encode_pitch_bend(ch: u8, value: u16) -> Vec<u8> {
     vec![0xE0 | ch, (value & 0x7F) as u8, ((value >> 7) & 0x7F) as u8]
 }
-fn encode_aftertouch(ch: u8, key: u8, pressure: u8) -> Vec<u8> { vec![0xA0 | ch, key, pressure] }
-fn encode_channel_pressure(ch: u8, pressure: u8) -> Vec<u8> { vec![0xD0 | ch, pressure] }
+fn encode_aftertouch(ch: u8, key: u8, pressure: u8) -> Vec<u8> {
+    vec![0xA0 | ch, key, pressure]
+}
+fn encode_channel_pressure(ch: u8, pressure: u8) -> Vec<u8> {
+    vec![0xD0 | ch, pressure]
+}

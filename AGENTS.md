@@ -37,13 +37,14 @@ nix run .
 | `cargo build` | standard build |
 | `cargo clippy` | lint (available inside `nix develop`) |
 | `cargo fmt` | format (available inside `nix develop`) |
-| `nix flake check` | verifies flake evaluation (no CI configured) |
+| `nix fmt` | format all files (Nix + Rust) via treefmt-nix |
+| `nix flake check` | verifies flake evaluation + formatting |
 
 There are no tests — no test directory, no test dependencies. Do not add testing infrastructure unless explicitly asked.
 
 ## Nix
 
-- Flake inputs: `nixpkgs/nixos-unstable`, `fenix` (follows nixpkgs).
+- Flake inputs: `nixpkgs/nixos-unstable`, `fenix` (follows nixpkgs), `treefmt-nix`.
 - Rust toolchain from fenix (stable), not from nixpkgs.
 - `buildInputs`: `gtk4`, `libadwaita`, `alsa-lib`.
 - `nativeBuildInputs`: `pkg-config`, `wrapGAppsHook4`, `autoPatchelfHook`.

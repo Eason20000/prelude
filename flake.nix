@@ -5,14 +5,38 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     fenix.url = "github:nix-community/fenix";
     fenix.inputs.nixpkgs.follows = "nixpkgs";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
-  outputs = { self, nixpkgs, fenix }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      fenix,
+      treefmt-nix,
+    }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
+      forAllSystems = nixpkgs.lib.genAttrs [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+      treefmtEval = forAllSystems (
+        system:
+        treefmt-nix.lib.evalModule (import nixpkgs { inherit system; }) {
+          projectRootFile = "flake.nix";
+          programs.nixfmt.enable = true;
+          programs.rustfmt.enable = true;
+          programs.rustfmt.edition = "2021";
+        }
+      );
     in
     {
-      packages = forAllSystems (system:
+      formatter = forAllSystems (system: treefmtEval.${system}.config.build.wrapper);
+      checks = forAllSystems (system: {
+        formatting = treefmtEval.${system}.config.build.check self;
+      });
+      packages = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           rust = fenix.packages.${system}.stable;
@@ -50,7 +74,8 @@
           };
 
           default = prelude;
-        });
+        }
+      );
 
       apps = forAllSystems (system: {
         default = {
@@ -59,21 +84,31 @@
         };
       });
 
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           rust = fenix.packages.${system}.stable;
         in
         {
           default = pkgs.mkShell {
-            packages = with pkgs; [
-              gtk4
-              libadwaita
-              alsa-lib
-              pkg-config
-              wrapGAppsHook4
-            ] ++ [ rust.cargo rust.rustc rust.rustfmt rust.clippy ];
+            packages =
+              with pkgs;
+              [
+                gtk4
+                libadwaita
+                alsa-lib
+                pkg-config
+                wrapGAppsHook4
+              ]
+              ++ [
+                rust.cargo
+                rust.rustc
+                rust.rustfmt
+                rust.clippy
+              ];
           };
-        });
+        }
+      );
     };
 }

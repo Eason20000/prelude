@@ -90,7 +90,11 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         let port_model = port_model.clone();
         move || {
             let ports = MidiEngine::list_ports();
-            port_model.splice(0, port_model.n_items(), &ports.iter().map(|s| &**s).collect::<Vec<_>>());
+            port_model.splice(
+                0,
+                port_model.n_items(),
+                &ports.iter().map(|s| &**s).collect::<Vec<_>>(),
+            );
             ports
         }
     };
@@ -198,7 +202,11 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
             glib::MainContext::default().spawn_local(async move {
                 if let Ok(file) = file_dialog.open_future(Some(&window)).await {
-                    let path = file.path().unwrap_or_default().to_string_lossy().to_string();
+                    let path = file
+                        .path()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let mut eng = engine.borrow_mut();
                     match eng.load(&path) {
                         Ok(name) => {
@@ -358,7 +366,12 @@ fn start_tick_loop(
     );
 }
 
-fn update_progress(engine: &MidiEngine, progress_bar: &gtk::ProgressBar, label_position: &gtk::Label, label_length: &gtk::Label) {
+fn update_progress(
+    engine: &MidiEngine,
+    progress_bar: &gtk::ProgressBar,
+    label_position: &gtk::Label,
+    label_length: &gtk::Label,
+) {
     let elapsed = engine.elapsed();
     let total = engine.total_length();
     if total > 0.0 {
