@@ -1,63 +1,79 @@
 {
-  description = "Prelude";
+  description = "Prelude - A MIDI file player";
 
   inputs = {
-    utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    fenix.url = "github:nix-community/fenix";
+    fenix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = {
-    self,
-    nixpkgs,
-    utils,
-    ...
-  }:
-    utils.lib.eachDefaultSystem (system: let
-      pkgs = import nixpkgs {inherit system;};
-      pythonPkgs = pkgs.python313Packages;
-    in {
-      packages.default = pythonPkgs.buildPythonPackage {
-        pname = "prelude";
-        version = "0.1.0";
-        format = "pyproject";
+  outputs = { self, nixpkgs, fenix }:
+    let
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
+    in
+    {
+      packages = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          rust = fenix.packages.${system}.stable;
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust.cargo;
+            rustc = rust.rustc;
+          };
+          rust-toolchain = rust.toolchain;
+        in
+        rec {
+          prelude = rustPlatform.buildRustPackage {
+            pname = "prelude";
+            version = "0.1.0";
+            src = self;
 
-        src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
 
-        allowSubstitutes = false;
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              wrapGAppsHook4
+              autoPatchelfHook
+            ];
 
-        build-system = [ pythonPkgs.hatchling ];
+            buildInputs = with pkgs; [
+              gtk4
+              libadwaita
+              alsa-lib
+            ];
 
-        dependencies = with pythonPkgs; [
-          mido
-          python-rtmidi
-          pygobject3
-        ];
+            meta = {
+              description = "A MIDI file player built with GTK4 and libadwaita";
+              license = pkgs.lib.licenses.gpl3Only;
+              mainProgram = "prelude";
+            };
+          };
 
-        nativeBuildInputs = with pkgs; [
-          wrapGAppsHook4
-          gobject-introspection
-        ];
+          default = prelude;
+        });
 
-        buildInputs = with pkgs; [
-          gtk4
-          libadwaita
-        ];
+      apps = forAllSystems (system: {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/prelude";
+        };
+      });
 
-        dontWrapGApps = true;
-
-        postInstall = ''
-          cp -r ui $out/${pythonPkgs.python.sitePackages}/prelude/
-        '';
-
-        preFixup = ''
-          makeWrapperArgs+=("''${gappsWrapperArgs[@]}")
-        '';
-      };
-
-      devShells.default = pkgs.mkShell {
-        inputsFrom = [self.packages.${system}.default];
-        shellHook = ''
-          export PS1="(prelude)$PS1"
-        '';
-      };
-    });
+      devShells = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          rust = fenix.packages.${system}.stable;
+        in
+        {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              gtk4
+              libadwaita
+              alsa-lib
+              pkg-config
+              wrapGAppsHook4
+            ] ++ [ rust.cargo rust.rustc rust.rustfmt rust.clippy ];
+          };
+        });
+    };
 }
