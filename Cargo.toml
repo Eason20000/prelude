@@ -9,5 +9,6 @@ authors = ["Eason20000 <eason05wyc@outlook.com>"]
 [dependencies]
 gtk = { package = "gtk4", version = "=0.11.3", features = ["v4_14"] }
 adw = { package = "libadwaita", version = "=0.9.1", features = ["v1_8"] }
+cairo = { package = "cairo-rs", version = "0.22" }
 midly = "0.5"
 midir = "0.11"

@@ -107,6 +107,7 @@ impl MidiEngine {
         if self.state != State::Playing {
             return;
         }
+        self.all_notes_off();
         self.paused_since = Some(Instant::now());
         self.state = State::Paused;
     }
@@ -140,7 +141,7 @@ impl MidiEngine {
                 self.start = Some(Instant::now() - Duration::from_secs_f64(position));
             }
             State::Paused => {
-                self.paused_since = Some(Instant::now());
+                self.start = Some(Instant::now() - Duration::from_secs_f64(position));
             }
             State::Stopped => {
                 self.start = None;
@@ -202,7 +203,64 @@ impl MidiEngine {
         &self.file_name
     }
 
-    // ── Port management ─────────────────────────────────────────
+    pub(crate) fn note_density_data(&self, bins: usize) -> Vec<f64> {
+        if self.events.is_empty() || self.total_length <= 0.0 || bins == 0 {
+            return vec![0.0; bins];
+        }
+
+        let mut intervals: Vec<(f64, f64)> = Vec::new();
+        let mut pending: Vec<(u8, u8, f64)> = Vec::new();
+
+        for (t, ev) in &self.events {
+            match ev {
+                MidiEvent::NoteOn {
+                    channel,
+                    key,
+                    velocity,
+                } if *velocity > 0 => {
+                    pending.push((*channel, *key, *t));
+                }
+                MidiEvent::NoteOff { channel, key, .. } => {
+                    if let Some(pos) = pending
+                        .iter()
+                        .position(|(ch, k, _)| *ch == *channel && *k == *key)
+                    {
+                        let (_, _, start) = pending.remove(pos);
+                        intervals.push((start, *t));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (_, _, start) in &pending {
+            intervals.push((*start, self.total_length));
+        }
+
+        if intervals.is_empty() {
+            return vec![0.0; bins];
+        }
+
+        let bin_width = self.total_length / bins as f64;
+        let mut density = vec![0.0; bins];
+
+        for (start, end) in intervals {
+            let start_bin = (start / bin_width).floor() as isize;
+            let end_bin = (end / bin_width).ceil() as isize;
+            for i in start_bin.max(0)..end_bin.min(bins as isize) {
+                density[i as usize] += 1.0;
+            }
+        }
+
+        let max_density = density.iter().cloned().fold(0.0_f64, f64::max);
+        if max_density > 0.0 {
+            for d in &mut density {
+                *d /= max_density;
+            }
+        }
+
+        density
+    }
 
     pub(crate) fn list_ports() -> Vec<String> {
         match MidiOutput::new(MIDI_CLIENT_NAME) {
