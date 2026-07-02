@@ -11,6 +11,14 @@ use crate::engine::{MidiEngine, State};
 
 const TICK_INTERVAL_MS: u32 = 20;
 
+macro_rules! get_object {
+    ($builder:expr, $id:literal, $ty:ty) => {
+        $builder
+            .object::<$ty>($id)
+            .expect(concat!("Failed to get ", $id))
+    };
+}
+
 pub(crate) struct PreludeApplication {
     engine: Rc<RefCell<MidiEngine>>,
 }
@@ -28,59 +36,37 @@ impl PreludeApplication {
     }
 }
 
+fn select_port(dropdown: &gtk::DropDown, ports: &[String], current: Option<&str>) {
+    if let Some(name) = current {
+        if let Some(i) = ports.iter().position(|p| p == name) {
+            dropdown.set_selected(i as u32);
+        }
+    } else {
+        dropdown.set_selected(0);
+    }
+}
+
 fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let builder = gtk::Builder::from_string(include_str!("../ui/window.ui"));
 
-    let window: adw::ApplicationWindow = builder
-        .object("window_main")
-        .expect("Failed to get window_main");
+    let window = get_object!(builder, "window_main", adw::ApplicationWindow);
     window.set_application(Some(app));
 
-    let toast_overlay: adw::ToastOverlay = builder
-        .object("toast_overlay")
-        .expect("Failed to get toast_overlay");
-    let main_stack: gtk::Stack = builder
-        .object("main_stack")
-        .expect("Failed to get main_stack");
-    let info_sheet: adw::BottomSheet = builder
-        .object("info_sheet")
-        .expect("Failed to get info_sheet");
-    let label_info: gtk::Label = builder
-        .object("label_info")
-        .expect("Failed to get label_info");
-    let label_name: gtk::Label = builder
-        .object("label_name")
-        .expect("Failed to get label_name");
-    let label_position: gtk::Label = builder
-        .object("label_position")
-        .expect("Failed to get label_position");
-    let label_length: gtk::Label = builder
-        .object("label_length")
-        .expect("Failed to get label_length");
-    let progress_bar: gtk::ProgressBar = builder
-        .object("progress_bar")
-        .expect("Failed to get progress_bar");
-    let btn_start_stop: gtk::Button = builder
-        .object("button_start_stop")
-        .expect("Failed to get button_start_stop");
-    let btn_info: gtk::Button = builder
-        .object("button_info")
-        .expect("Failed to get button_info");
-    let btn_info_close: gtk::Button = builder
-        .object("button_info_close")
-        .expect("Failed to get button_info_close");
-    let btn_open: gtk::Button = builder
-        .object("button_open")
-        .expect("Failed to get button_open");
-    let btn_stop: gtk::Button = builder
-        .object("button_stop")
-        .expect("Failed to get button_stop");
-    let btn_backward: gtk::Button = builder
-        .object("button_backward")
-        .expect("Failed to get button_backward");
-    let btn_forward: gtk::Button = builder
-        .object("button_forward")
-        .expect("Failed to get button_forward");
+    let toast_overlay = get_object!(builder, "toast_overlay", adw::ToastOverlay);
+    let main_stack = get_object!(builder, "main_stack", gtk::Stack);
+    let info_sheet = get_object!(builder, "info_sheet", adw::BottomSheet);
+    let label_info = get_object!(builder, "label_info", gtk::Label);
+    let label_name = get_object!(builder, "label_name", gtk::Label);
+    let label_position = get_object!(builder, "label_position", gtk::Label);
+    let label_length = get_object!(builder, "label_length", gtk::Label);
+    let progress_bar = get_object!(builder, "progress_bar", gtk::ProgressBar);
+    let btn_start_stop = get_object!(builder, "button_start_stop", gtk::Button);
+    let btn_info = get_object!(builder, "button_info", gtk::Button);
+    let btn_info_close = get_object!(builder, "button_info_close", gtk::Button);
+    let btn_open = get_object!(builder, "button_open", gtk::Button);
+    let btn_stop = get_object!(builder, "button_stop", gtk::Button);
+    let btn_backward = get_object!(builder, "button_backward", gtk::Button);
+    let btn_forward = get_object!(builder, "button_forward", gtk::Button);
 
     // ── Port model / dropdown ──
     let port_model = gtk::StringList::new(&[]);
@@ -122,14 +108,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         let ports = populate();
         if !ports.is_empty() {
             let current = engine_for_dialog.borrow();
-            let current = current.port_name();
-            if let Some(name) = &current {
-                if let Some(i) = ports.iter().position(|p| p == name) {
-                    port_dropdown_for_dialog.set_selected(i as u32);
-                }
-            } else {
-                port_dropdown_for_dialog.set_selected(0);
-            }
+            select_port(&port_dropdown_for_dialog, &ports, current.port_name());
         }
 
         let refresh_btn = gtk::Button::builder()
@@ -305,14 +284,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         let ports = populate_ports();
         if !ports.is_empty() {
             let current = engine.borrow();
-            let current = current.port_name();
-            if let Some(name) = &current {
-                if let Some(i) = ports.iter().position(|p| p == name) {
-                    port_dropdown.set_selected(i as u32);
-                }
-            } else {
-                port_dropdown.set_selected(0);
-            }
+            select_port(&port_dropdown, &ports, current.port_name());
         }
     }
 

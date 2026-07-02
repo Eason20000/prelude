@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 use midir::{MidiOutput, MidiOutputConnection};
 use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
 
+const MIDI_CLIENT_NAME: &str = "prelude";
+
 /// A MIDI event that can be sent to a port.
 #[derive(Debug, Clone)]
 pub(crate) enum MidiEvent {
@@ -203,7 +205,7 @@ impl MidiEngine {
     // ── Port management ─────────────────────────────────────────
 
     pub(crate) fn list_ports() -> Vec<String> {
-        match MidiOutput::new("prelude") {
+        match MidiOutput::new(MIDI_CLIENT_NAME) {
             Ok(midi) => midi
                 .ports()
                 .iter()
@@ -216,8 +218,8 @@ impl MidiEngine {
     pub(crate) fn open_port(&mut self, name: &str) -> Result<(), String> {
         self.port = None;
 
-        let midi =
-            MidiOutput::new("prelude").map_err(|e| format!("Failed to create MIDI output: {e}"))?;
+        let midi = MidiOutput::new(MIDI_CLIENT_NAME)
+            .map_err(|e| format!("Failed to create MIDI output: {e}"))?;
 
         let ports = midi.ports();
         let port = ports
@@ -257,11 +259,10 @@ impl MidiEngine {
     fn all_notes_off(&mut self) {
         if let Some(ref mut port) = self.port {
             for ch in 0..16u8 {
-                if let Err(e) = port.send(&encode_cc(ch, 123, 0)) {
-                    eprintln!("MIDI send error (all notes off): {e}");
-                }
-                if let Err(e) = port.send(&encode_cc(ch, 120, 0)) {
-                    eprintln!("MIDI send error (all sound off): {e}");
+                for (cc, desc) in [(123, "all notes off"), (120, "all sound off")] {
+                    if let Err(e) = port.send(&encode_cc(ch, cc, 0)) {
+                        eprintln!("MIDI send error ({desc}): {e}");
+                    }
                 }
             }
         }
