@@ -1,6 +1,6 @@
 # Prelude
 
-A MIDI file player built with GTK4 and libadwaita.
+A MIDI file player built with GTK4 and libadwaita, respecting the GNOME Human Interface Guidelines.
 
 ## Usage
 
