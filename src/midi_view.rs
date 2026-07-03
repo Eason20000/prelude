@@ -125,7 +125,6 @@ impl MidiDensityView {
         self.area.queue_draw();
     }
 
-    #[allow(dead_code)]
     pub(crate) fn position(&self) -> f64 {
         self.position.get()
     }

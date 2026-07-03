@@ -377,6 +377,8 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     }
 
     // ── Scale seek (change-value signal) ──
+    // While the user is dragging the slider, deferred to release.
+    // The tick loop detects ACTIVE → !ACTIVE and seeks once.
     {
         let engine = engine.clone();
         let scale_ref = seek_scale.clone();
@@ -491,6 +493,7 @@ fn start_tick_loop(
             let scale_active = scale.state_flags().contains(gtk::StateFlags::ACTIVE);
 
             if !scale_active {
+                // dragged then released — seek once to final position
                 if was_scale_active.get() {
                     was_scale_active.set(false);
                     eng.seek(adj.value());
