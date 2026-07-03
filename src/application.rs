@@ -248,7 +248,11 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let midi_filter = gtk::FileFilter::new();
     midi_filter.set_name(Some("MIDI files"));
     midi_filter.add_pattern("*.mid");
+    midi_filter.add_pattern("*.MID");
     midi_filter.add_pattern("*.midi");
+    midi_filter.add_pattern("*.MIDI");
+    midi_filter.add_pattern("*.smf");
+    midi_filter.add_pattern("*.SMF");
     let all_filter = gtk::FileFilter::new();
     all_filter.set_name(Some("All files"));
     all_filter.add_pattern("*");
