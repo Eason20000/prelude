@@ -124,13 +124,14 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     main_inner_box.insert_child_after(density_view.widget(), Some(&label_name));
 
     // ── Density view position changed → seek ──
-    {
-        let engine = engine.clone();
-        density_view.set_on_position_changed(move |pos| {
+    density_view.set_on_position_changed(clone!(
+        #[strong]
+        engine,
+        move |pos| {
             let total = engine.borrow().total_length();
             engine.borrow_mut().seek(pos * total);
-        });
-    }
+        },
+    ));
 
     // ── Drag & drop overlay ──
     {
@@ -201,8 +202,9 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let port_model = gtk::StringList::new(&[]);
     let port_dropdown = gtk::DropDown::new(Some(port_model.clone()), None::<&gtk::Expression>);
 
-    let populate_ports = {
-        let port_model = port_model.clone();
+    let populate_ports = clone!(
+        #[strong]
+        port_model,
         move || {
             let ports = MidiEngine::list_ports();
             port_model.splice(
@@ -211,70 +213,83 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                 &ports.iter().map(|s| &**s).collect::<Vec<_>>(),
             );
             ports
-        }
-    };
+        },
+    );
 
     // ── Actions (menu) ──
     let about_action = gio::SimpleAction::new("about", None);
-    let win = window.clone();
-    about_action.connect_activate(move |_, _| show_about(&win));
+    about_action.connect_activate(clone!(
+        #[strong]
+        window,
+        move |_, _| show_about(&window),
+    ));
     app.add_action(&about_action);
 
     let port_action = gio::SimpleAction::new("port-settings", None);
-    let win = window.clone();
-    let engine_for_dialog = engine.clone();
-    let populate = populate_ports.clone();
-    let populate_refresh = populate_ports.clone();
-    let port_dropdown_for_dialog = port_dropdown.clone();
-    port_action.connect_activate(move |_, _| {
-        let dialog = adw::AlertDialog::builder()
-            .title("Port settings")
-            .body("Select MIDI output port:")
-            .build();
-        dialog.add_response("close", "Close");
-        dialog.set_default_response(Some("close"));
+    port_action.connect_activate(clone!(
+        #[strong]
+        engine,
+        #[strong]
+        populate_ports,
+        #[strong]
+        port_dropdown,
+        #[strong]
+        window,
+        move |_, _| {
+            let dialog = adw::AlertDialog::builder()
+                .title("Port settings")
+                .body("Select MIDI output port:")
+                .build();
+            dialog.add_response("close", "Close");
+            dialog.set_default_response(Some("close"));
 
-        let ports = populate();
-        if !ports.is_empty() {
-            let current = engine_for_dialog.borrow();
-            select_port(&port_dropdown_for_dialog, &ports, current.port_name());
-        }
+            let ports = populate_ports();
+            if !ports.is_empty() {
+                let current = engine.borrow();
+                select_port(&port_dropdown, &ports, current.port_name());
+            }
 
-        let refresh_btn = gtk::Button::builder()
-            .icon_name("view-refresh-symbolic")
-            .tooltip_text("Refresh ports")
-            .build();
+            let refresh_btn = gtk::Button::builder()
+                .icon_name("view-refresh-symbolic")
+                .tooltip_text("Refresh ports")
+                .build();
 
-        {
-            let ports_reload = populate_refresh.clone();
-            let dd = port_dropdown_for_dialog.clone();
-            refresh_btn.connect_clicked(move |_| {
-                let ports = ports_reload();
-                if !ports.is_empty() {
-                    dd.set_selected(0);
-                }
-            });
-        }
+            refresh_btn.connect_clicked(clone!(
+                #[strong]
+                populate_ports,
+                #[strong]
+                port_dropdown,
+                move |_| {
+                    let ports = populate_ports();
+                    if !ports.is_empty() {
+                        port_dropdown.set_selected(0);
+                    }
+                },
+            ));
 
-        let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        box_.append(&port_dropdown_for_dialog);
-        box_.append(&refresh_btn);
-        dialog.set_extra_child(Some(&box_));
-        dialog.present(Some(&win));
-    });
+            let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            box_.append(&port_dropdown);
+            box_.append(&refresh_btn);
+            dialog.set_extra_child(Some(&box_));
+            dialog.present(Some(&window));
+        },
+    ));
     app.add_action(&port_action);
 
-    {
-        let engine = engine.clone();
-        port_dropdown.connect_selected_notify(move |dd| {
+    port_dropdown.connect_selected_notify(clone!(
+        #[strong]
+        engine,
+        #[strong]
+        port_model,
+        move |dd| {
             let pos = dd.selected();
             if pos != u32::MAX {
                 if let Some(name) = port_model.string(pos) {
                     let _ = engine.borrow_mut().open_port(name.as_ref());
                 }
             }
-        });
-    }
+        },
+    ));
 
     // ── File dialog ──
     let file_dialog = gtk::FileDialog::new();
@@ -371,101 +386,119 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         ));
     }
 
-    {
-        let engine = engine.clone();
-        let label_info = label_info.clone();
-        let info_sheet = info_sheet.clone();
-        btn_info.connect_clicked(move |_| {
+    btn_info.connect_clicked(clone!(
+        #[strong]
+        engine,
+        #[strong]
+        label_info,
+        #[strong]
+        info_sheet,
+        move |_| {
             let eng = engine.borrow();
             label_info.set_label(&format_info(&eng));
             info_sheet.set_open(true);
-        });
-    }
+        },
+    ));
 
-    {
-        let info_sheet = info_sheet.clone();
-        btn_info_close.connect_clicked(move |_| {
+    btn_info_close.connect_clicked(clone!(
+        #[strong]
+        info_sheet,
+        move |_| {
             info_sheet.set_open(false);
-        });
-    }
+        },
+    ));
 
-    {
-        let engine = engine.clone();
-        btn_start_stop.connect_clicked(move |_| {
+    btn_start_stop.connect_clicked(clone!(
+        #[strong]
+        engine,
+        move |_| {
             engine.borrow_mut().toggle_play_pause();
-        });
-    }
+        },
+    ));
 
-    {
-        let engine = engine.clone();
-        let label_position = label_position.clone();
-        let seek_adjustment = seek_adjustment.clone();
-        let dv_stop = density_view.clone();
-        btn_stop.connect_clicked(move |_| {
+    btn_stop.connect_clicked(clone!(
+        #[strong]
+        engine,
+        #[strong]
+        label_position,
+        #[strong]
+        seek_adjustment,
+        #[strong]
+        density_view,
+        move |_| {
             engine.borrow_mut().stop();
             label_position.set_text("0:00");
             seek_adjustment.set_value(0.0);
-            dv_stop.set_position(0.0);
-        });
-    }
+            density_view.set_position(0.0);
+        },
+    ));
 
     // ── Scale seek (change-value signal) ──
     // While the user is dragging the slider, deferred to release.
     // The tick loop detects ACTIVE → !ACTIVE and seeks once.
-    {
-        let engine = engine.clone();
-        let scale_ref = seek_scale.clone();
-        seek_scale.connect_change_value(move |_scale, _scroll, new_value| {
-            if scale_ref.state_flags().contains(gtk::StateFlags::ACTIVE) {
+    seek_scale.connect_change_value(clone!(
+        #[strong]
+        engine,
+        #[strong]
+        seek_scale,
+        move |_scale, _scroll, new_value| {
+            if seek_scale.state_flags().contains(gtk::StateFlags::ACTIVE) {
                 return gtk::glib::Propagation::Proceed;
             }
             let total = engine.borrow().total_length();
             engine.borrow_mut().seek(new_value.clamp(0.0, total));
             gtk::glib::Propagation::Proceed
-        });
-    }
+        },
+    ));
 
     // ── Keyboard seek: left/right arrows ──
     {
-        let engine = engine.clone();
         let key_controller = gtk::EventControllerKey::new();
-        key_controller.connect_key_pressed(move |_controller, keyval, _keycode, _modifier| {
-            let mut eng = engine.borrow_mut();
-            let current = eng.elapsed();
-            let total = eng.total_length();
-            if keyval == gdk::Key::Left {
-                eng.seek((current - SEEK_STEP).max(0.0));
-            } else if keyval == gdk::Key::Right {
-                eng.seek((current + SEEK_STEP).min(total));
-            }
-            gtk::glib::Propagation::Proceed
-        });
+        key_controller.connect_key_pressed(clone!(
+            #[strong]
+            engine,
+            move |_controller, keyval, _keycode, _modifier| {
+                let mut eng = engine.borrow_mut();
+                let current = eng.elapsed();
+                let total = eng.total_length();
+                if keyval == gdk::Key::Left {
+                    eng.seek((current - SEEK_STEP).max(0.0));
+                } else if keyval == gdk::Key::Right {
+                    eng.seek((current + SEEK_STEP).min(total));
+                }
+                gtk::glib::Propagation::Proceed
+            },
+        ));
         window.add_controller(key_controller);
     }
 
     // ── Keyboard shortcut: Space ──
     {
-        let engine = engine.clone();
         let controller = gtk::ShortcutController::new();
         let shortcut = gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("space"),
-            Some(gtk::CallbackAction::new(move |_, _| {
-                engine.borrow_mut().toggle_play_pause();
-                glib::Propagation::Proceed
-            })),
+            Some(gtk::CallbackAction::new(clone!(
+                #[strong]
+                engine,
+                move |_, _| {
+                    engine.borrow_mut().toggle_play_pause();
+                    glib::Propagation::Proceed
+                },
+            ))),
         );
         controller.add_shortcut(shortcut);
         window.add_controller(controller);
     }
 
     // ── Close request ──
-    {
-        let engine = engine.clone();
-        window.connect_close_request(move |_| {
+    window.connect_close_request(clone!(
+        #[strong]
+        engine,
+        move |_| {
             engine.borrow_mut().stop();
             glib::Propagation::Proceed
-        });
-    }
+        },
+    ));
 
     // ── Refresh ports and select first one ──
     {
@@ -478,88 +511,96 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     // ── Tick loop ──
     start_tick_loop(
-        &engine,
-        &btn_start_stop,
-        &seek_scale,
-        &seek_adjustment,
-        &density_view,
-        &label_position,
-        &label_length,
+        engine.clone(),
+        btn_start_stop.clone(),
+        seek_scale.clone(),
+        seek_adjustment.clone(),
+        density_view.clone(),
+        label_position.clone(),
+        label_length.clone(),
     );
 
     window.present();
 }
 
 fn start_tick_loop(
-    engine: &Rc<RefCell<MidiEngine>>,
-    btn_start_stop: &gtk::Button,
-    seek_scale: &gtk::Scale,
-    seek_adjustment: &gtk::Adjustment,
-    density_view: &MidiDensityView,
-    label_position: &gtk::Label,
-    label_length: &gtk::Label,
+    engine: Rc<RefCell<MidiEngine>>,
+    btn_start_stop: gtk::Button,
+    seek_scale: gtk::Scale,
+    seek_adjustment: gtk::Adjustment,
+    density_view: MidiDensityView,
+    label_position: gtk::Label,
+    label_length: gtk::Label,
 ) {
-    let engine = engine.clone();
-    let btn_ss = btn_start_stop.clone();
-    let scale = seek_scale.clone();
-    let adj = seek_adjustment.clone();
-    let dv = density_view.clone();
-    let lp = label_position.clone();
-    let ll = label_length.clone();
-
     let was_scale_active = Rc::new(Cell::new(false));
 
     glib::timeout_add_local(
         std::time::Duration::from_millis(TICK_INTERVAL_MS.into()),
-        move || {
-            let mut eng = engine.borrow_mut();
-            let state = eng.state();
+        clone!(
+            #[strong]
+            engine,
+            #[strong]
+            btn_start_stop,
+            #[strong]
+            seek_scale,
+            #[strong]
+            seek_adjustment,
+            #[strong]
+            density_view,
+            #[strong]
+            label_position,
+            #[strong]
+            label_length,
+            move || {
+                let mut eng = engine.borrow_mut();
+                let state = eng.state();
 
-            if state == State::Playing {
-                let due = eng.tick();
-                for ev in &due {
-                    eng.send_event(ev);
+                if state == State::Playing {
+                    let due = eng.tick();
+                    for ev in &due {
+                        eng.send_event(ev);
+                    }
                 }
-            }
 
-            let total = eng.total_length();
-            let scale_active = scale.state_flags().contains(gtk::StateFlags::ACTIVE);
+                let total = eng.total_length();
+                let scale_active = seek_scale.state_flags().contains(gtk::StateFlags::ACTIVE);
 
-            if !scale_active {
-                // dragged then released — seek once to final position
-                if was_scale_active.get() {
-                    was_scale_active.set(false);
-                    eng.seek(adj.value());
-                }
-                if !dv.is_dragging() {
-                    if state == State::Playing {
-                        let elapsed = eng.elapsed();
-                        adj.set_value(elapsed);
-                        if total > 0.0 {
-                            dv.set_position(elapsed / total);
+                if !scale_active {
+                    // dragged then released — seek once to final position
+                    if was_scale_active.get() {
+                        was_scale_active.set(false);
+                        eng.seek(seek_adjustment.value());
+                    }
+                    if !density_view.is_dragging() {
+                        if state == State::Playing {
+                            let elapsed = eng.elapsed();
+                            seek_adjustment.set_value(elapsed);
+                            if total > 0.0 {
+                                density_view.set_position(elapsed / total);
+                            }
                         }
+                    } else {
+                        seek_adjustment.set_value(density_view.position() * total);
                     }
                 } else {
-                    adj.set_value(dv.position() * total);
+                    was_scale_active.set(true);
+                    if !density_view.is_dragging() && total > 0.0 {
+                        density_view.set_position(seek_adjustment.value() / total);
+                    }
                 }
-            } else {
-                was_scale_active.set(true);
-                if !dv.is_dragging() && total > 0.0 {
-                    dv.set_position(adj.value() / total);
+
+                if state == State::Playing && eng.state() != State::Playing {
+                    eng.stop();
                 }
-            }
 
-            if state == State::Playing && eng.state() != State::Playing {
-                eng.stop();
-            }
+                let elapsed = eng.elapsed();
+                label_position.set_text(&format_time(elapsed));
+                label_length.set_text(&format_time(total));
+                update_transport_button(&eng, &btn_start_stop);
 
-            let elapsed = eng.elapsed();
-            lp.set_text(&format_time(elapsed));
-            ll.set_text(&format_time(total));
-            update_transport_button(&eng, &btn_ss);
-
-            glib::ControlFlow::Continue
-        },
+                glib::ControlFlow::Continue
+            },
+        ),
     );
 }
 
