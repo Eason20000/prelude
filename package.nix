@@ -1,29 +1,25 @@
 {
-  rustPlatform,
-  src,
-  stdenv,
+  self,
   lib,
+  rustPlatform,
   pkg-config,
   wrapGAppsHook4,
-  autoPatchelfHook,
   gtk4,
   libadwaita,
   alsa-lib,
 }:
 
-rustPlatform.buildRustPackage {
-  pname = "prelude";
-  version = "0.1.0";
-  inherit src;
+rustPlatform.buildRustPackage rec {
+  pname = (lib.importTOML (src + "/Cargo.toml")).package.name;
+  version = (lib.importTOML (src + "/Cargo.toml")).package.version;
 
-  cargoLock.lockFile = src + /Cargo.lock;
+  src = self;
+  cargoLock.lockFile = src + "/Cargo.lock";
 
   nativeBuildInputs = [
     pkg-config
     wrapGAppsHook4
-    autoPatchelfHook
   ];
-
   buildInputs = [
     gtk4
     libadwaita
@@ -34,5 +30,6 @@ rustPlatform.buildRustPackage {
     description = "A MIDI file player built with GTK4 and libadwaita";
     license = lib.licenses.gpl3Only;
     mainProgram = "prelude";
+    platforms = lib.platforms.linux;
   };
 }

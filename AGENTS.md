@@ -7,10 +7,7 @@
 nix develop
 
 # build & run
-cargo build && cargo run
-
-# or run directly via flake
-nix run .
+nix build && nix run .
 ```
 
 ## Architecture
@@ -34,61 +31,22 @@ nix run .
 
 | Command | Notes |
 |---|---|
-| `cargo build` | standard build |
-| `cargo clippy` | lint (available inside `nix develop`) |
-| `cargo fmt` | format (available inside `nix develop`) |
-| `nix fmt` | format all files (Nix + Rust) via treefmt-nix |
+| `nix build` | standard build (runs checkPhase, no tests configured) |
 | `nix flake check` | verifies flake evaluation + formatting |
-| `nix build` | build Linux binary |
-| `nix build .#prelude-windows` | cross-compile Windows binary |
+| `nix fmt` | format all files (Nix + Rust) via treefmt-nix |
+| `nix develop` | dev shell with `cargo build` / `cargo clippy` |
 
 There are no tests — no test directory, no test dependencies. Do not add testing infrastructure unless explicitly asked.
 
 ## Nix
 
-- Flake inputs: `nixpkgs/nixos-unstable`, `fenix` (follows nixpkgs), `treefmt-nix`.
-- Rust toolchain from fenix (stable), not from nixpkgs.
-- `buildInputs`: `gtk4`, `libadwaita`, `alsa-lib`.
-- `nativeBuildInputs`: `pkg-config`, `wrapGAppsHook4`, `autoPatchelfHook`.
+- Flake inputs: `nixpkgs/nixpkgs-unstable`, `treefmt-nix`.
+- Rust toolchain from nixpkgs (`rustPlatform`), supported system `x86_64-linux` only.
+- `package.nix` reads `pname`/`version` from `Cargo.toml` via `lib.importTOML` — single source of truth, never hardcode them.
+- `treefmt.nix` holds the formatter config; `flake.nix` only evaluates it.
+- `devShells.default` uses `inputsFrom` the package — dependency lists are not duplicated.
+- `nix run .` works via `meta.mainProgram`; there is no `apps` output.
 - Both `Cargo.lock` and `flake.lock` are committed.
-- Supported systems: `x86_64-linux`, `aarch64-linux`.
-
-## Windows cross-compilation
-
-Cross-compiles Prelude to `x86_64-pc-windows-gnu` (MinGW target).
-
-```bash
-# build the Windows binary with bundled DLLs and runtime resources
-nix build .#prelude-windows
-```
-
-### Architecture (see `nix/` directory)
-
-| File | Role |
-|---|---|
-| `nix/windows-deps.nix` | Downloads 92 MSYS2 pre-built packages (GTK4, libadwaita, GStreamer, appstream + full transitive deps), rewrites `.pc` file prefixes to Nix store paths, removes static `.a` files (keeping only `.dll.a`), adds `libpthread.a → libmcfgthread.a` symlink for Rust's MinGW target compatibility. |
-| `nix/windows-build.nix` | Cross-compilation derivation: fenix Rust toolchain with `x86_64-pc-windows-gnu` target, `pkgsCross.ucrt64` MinGW linker, vendored cargo deps, bundles `.exe` + 162 DLLs + GSettings schemas (compiled via `glib-compile-schemas`) + MIME database (via `update-mime-database`) + Adwaita icon theme + GTK4 settings. |
-
-### Key design decisions
-
-- **MSYS2 pre-built packages** (not source-build): GTK4/libadwaita can't cross-compile from source in nixpkgs. Instead, fetch UCRT64 binary packages from MSYS2 mirror.
-- **`.dll.a` import libraries**: MSYS2 provides MinGW-compatible `.dll.a` files natively. Static `.a` are removed to force dynamic linking.
-- **`.pc` prefix rewriting**: MSYS2 `.pc` files have `prefix=/ucrt64` which is rewritten to the Nix store path via `substituteInPlace`.
-- **ALSA handling**: `alsa-lib` from nixpkgs is added to `nativeBuildInputs` so `alsa-sys` build script can probe on the host. The `midir` crate gates ALSA behind `cfg(target_os = "linux")` so it's not linked for Windows.
-- **mcfgthreads**: nixpkgs' MinGW uses `mcfgthreads` instead of `winpthreads`. A `libpthread.a → libmcfgthread.a` symlink is created for Rust's MinGW target.
-- **GStreamer + appstream**: Despite Prelude not needing video, the MSYS2-built `libgtk-4-1.dll` has hard runtime deps on GStreamer, and `libadwaita-1-0.dll` on appstream. These are included.
-- **GDK-Pixbuf loader cache**: Linux `gdk-pixbuf-query-loaders` can't introspect Windows PE `.dll` files. GDK-Pixbuf on Windows auto-discovers loaders from the standard directory at runtime.
-
-### Creating a test distribution
-
-```bash
-nix build .#prelude-windows
-OUT=$(nix eval --impure --raw .#prelude-windows)
-cp -r "$OUT"/* /tmp/prelude/
-(cd /tmp && zip -r ~/prelude-windows-test.zip prelude/)
-```
-
-Output: ~53 MB zip containing `bin/` (exe + 162 DLLs), `lib/` (pixbuf loaders), `share/` (icons, schemas, mime), `etc/` (GTK4 settings).
 
 ## Constraints
 
