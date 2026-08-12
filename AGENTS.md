@@ -14,9 +14,9 @@ nix build && nix run .
 
 - Single crate at repo root (no workspace).
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`, runs `application::PreludeApplication`.
-- `src/application.rs` owns all GTK widget wiring — reads `ui/window.ui` via `include_str!("../ui/window.ui")` at compile time; runs a `glib::timeout_add_local` tick loop every 20 ms.
+- `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` (compiled to GtkBuilder XML by `build.rs` into `OUT_DIR`); runs a `glib::timeout_add_local` tick loop every 20 ms.
 - `src/engine.rs` parses MIDI via `midly`, sends events via `midir`; handles play/pause/stop/seek/port management.
-- `ui/window.ui` is the only UI definition file. Change it → rebuild required.
+- `ui/window.blp` (Blueprint) is the only UI definition file. Change it → `build.rs` recompiles it on the next `cargo build`.
 
 ## Dependencies (non-obvious)
 
@@ -50,8 +50,8 @@ There are no tests — no test directory, no test dependencies. Do not add testi
 
 ## Constraints
 
-- **UI template is compiled in**: edit `ui/window.ui` → rebuild.
-- **No `build.rs`**, no codegen, no migrations.
+- **UI template is compiled in**: `ui/window.blp` → `build.rs` → GtkBuilder XML embedded via `include_str`; the generated `.ui` is never committed.
+- **`build.rs` exists only to invoke `blueprint-compiler`** (a deliberate exception to the general no-build.rs policy — Blueprint needs a compile step). `blueprint-compiler` must be in `nativeBuildInputs` (package) / devShell.
 - **No CI** — no workflows in `.github/workflows/`.
 - **App is GPL-3.0-only**; license must be preserved on reuse.
 - Target environment: **Linux** with a running ALSA sequencer or hardware MIDI port.

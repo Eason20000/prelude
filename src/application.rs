@@ -50,7 +50,7 @@ fn select_port(dropdown: &gtk::DropDown, ports: &[String], current: Option<&str>
 }
 
 fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
-    let builder = gtk::Builder::from_string(include_str!("../ui/window.ui"));
+    let builder = gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/window.ui")));
 
     let window = get_object!(builder, "window_main", adw::ApplicationWindow);
     window.set_application(Some(app));

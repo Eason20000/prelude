@@ -1,0 +1,284 @@
+using Gtk 4.0;
+using Adw 1;
+
+Adw.ApplicationWindow window_main {
+  default-height: 400;
+  default-width: 720;
+  title: "Prelude";
+
+  Adw.BottomSheet info_sheet {
+    can-open: false;
+
+    [content]
+    Adw.ToastOverlay toast_overlay {
+      Overlay drag_overlay {
+        vexpand: true;
+
+        [overlay]
+        Revealer drag_revealer {
+          transition-type: crossfade;
+          can-target: false;
+
+          Adw.StatusPage {
+            css-classes: [
+              "drag-overlay-status-page",
+            ];
+
+            icon-name: "folder-music-symbolic";
+            title: "Drop a MIDI file to play";
+          }
+        }
+
+        Adw.ToolbarView main_content {
+          [top]
+          Adw.HeaderBar header_bar {
+            [start]
+            Button button_open {
+              icon-name: "document-open-symbolic";
+              tooltip-text: "Open MIDI file";
+            }
+
+            title-widget: Adw.WindowTitle {
+              title: "Prelude";
+            };
+
+            [end]
+            MenuButton button_menu {
+              menu-model: primary_menu;
+              icon-name: "open-menu-symbolic";
+              tooltip-text: "Menu";
+              primary: true;
+            }
+          }
+
+          Stack main_stack {
+            transition-type: crossfade;
+            vexpand: true;
+
+            StackPage {
+              name: "initial-view";
+
+              child: Adw.Clamp {
+                maximum-size: 450;
+                vexpand: true;
+                valign: fill;
+
+                child: Adw.StatusPage status_page {
+                  icon-name: "audio-x-generic-symbolic";
+                  title: "Prelude";
+                  description: "Open a MIDI file to start playing";
+
+                  Box {
+                    orientation: vertical;
+                    spacing: 12;
+
+                    Button button_open_initial {
+                      label: "Open…";
+                      halign: center;
+
+                      styles [
+                        "pill",
+                        "suggested-action",
+                      ]
+                    }
+                  }
+                };
+              };
+            }
+
+            StackPage {
+              name: "error-view";
+
+              child: Adw.Clamp {
+                maximum-size: 450;
+                vexpand: true;
+                valign: fill;
+
+                child: Adw.StatusPage error_page {
+                  icon-name: "dialog-warning-symbolic";
+                  title: "Cannot Play File";
+                  description: "An error occurred while loading the file.";
+
+                  Box {
+                    orientation: vertical;
+                    spacing: 12;
+
+                    Button button_error_retry {
+                      label: "Try Again";
+                      halign: center;
+
+                      styles [
+                        "pill",
+                        "suggested-action",
+                      ]
+                    }
+                  }
+                };
+              };
+            }
+
+            StackPage {
+              name: "main-view";
+
+              child: Box {
+                orientation: vertical;
+                vexpand: true;
+                spacing: 12;
+                margin-start: 24;
+                margin-end: 24;
+                margin-top: 24;
+                margin-bottom: 24;
+
+                Adw.Clamp {
+                  maximum-size: 480;
+                  vexpand: true;
+                  valign: fill;
+
+                  child: Box main_inner_box {
+                    orientation: vertical;
+                    vexpand: true;
+                    valign: center;
+                    spacing: 12;
+
+                    Label label_name {
+                      label: "No file loaded";
+                      xalign: 0.5;
+                      wrap: true;
+
+                      styles [
+                        "title-1",
+                      ]
+                    }
+
+                    Scale seek_scale {
+                      hexpand: true;
+                      draw-value: false;
+
+                      adjustment: Adjustment seek_adjustment {
+                        upper: 1.0;
+                        lower: 0.0;
+                        value: 0.0;
+                        step-increment: 5.0;
+                      };
+                    }
+
+                    Box {
+                      Label label_position {
+                        label: "0:00";
+
+                        styles [
+                          "caption",
+                          "numeric",
+                        ]
+                      }
+
+                      Label label_length {
+                        label: "0:00";
+                        hexpand: true;
+                        halign: end;
+
+                        styles [
+                          "caption",
+                          "numeric",
+                        ]
+                      }
+                    }
+
+                    CenterBox controls_box {
+                      margin-bottom: 9;
+
+                      styles [
+                        "toolbar-controls",
+                      ]
+
+                      [start]
+                      Button button_info {
+                        icon-name: "dialog-information-symbolic";
+                        tooltip-text: "File information";
+
+                        styles [
+                          "circular",
+                        ]
+                      }
+
+                      [center]
+                      Box {
+                        spacing: 12;
+
+                        Button button_start_stop {
+                          Adw.ButtonContent {
+                            icon-name: "media-playback-start-symbolic";
+                          }
+
+                          styles [
+                            "circular",
+                            "large",
+                          ]
+                        }
+
+                        Button button_stop {
+                          Adw.ButtonContent {
+                            icon-name: "media-playback-stop-symbolic";
+                          }
+
+                          styles [
+                            "circular",
+                          ]
+                        }
+                      }
+                    }
+                  };
+                }
+              };
+            }
+          }
+        }
+      }
+    }
+
+    [sheet]
+    Box {
+      orientation: vertical;
+      spacing: 12;
+      margin-start: 24;
+      margin-end: 24;
+      margin-top: 24;
+      margin-bottom: 24;
+
+      Label {
+        label: "File Information";
+
+        styles [
+          "title-3",
+        ]
+      }
+
+      Label label_info {
+        label: "No file loaded";
+        xalign: 0;
+        wrap: true;
+      }
+
+      Button button_info_close {
+        label: "Close";
+        halign: end;
+      }
+    }
+  }
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: "Port settings…";
+      action: "app.port-settings";
+    }
+  }
+
+  section {
+    item {
+      label: "_About Prelude";
+      action: "app.about";
+    }
+  }
+}

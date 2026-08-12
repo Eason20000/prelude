@@ -4,6 +4,7 @@
   rustPlatform,
   pkg-config,
   wrapGAppsHook4,
+  blueprint-compiler,
   gtk4,
   libadwaita,
   alsa-lib,
@@ -19,6 +20,7 @@ rustPlatform.buildRustPackage rec {
   nativeBuildInputs = [
     pkg-config
     wrapGAppsHook4
+    blueprint-compiler
   ];
   buildInputs = [
     gtk4
