@@ -6,6 +6,8 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 
+use glib::clone;
+
 use adw::prelude::*;
 
 use crate::engine::{MidiEngine, State};
@@ -13,6 +15,7 @@ use crate::midi_view::MidiDensityView;
 
 const TICK_INTERVAL_MS: u32 = 20;
 const SEEK_STEP: f64 = 5.0;
+const DENSITY_BINS: usize = 300;
 
 macro_rules! get_object {
     ($builder:expr, $id:literal, $ty:ty) => {
@@ -49,6 +52,40 @@ fn select_port(dropdown: &gtk::DropDown, ports: &[String], current: Option<&str>
     }
 }
 
+/// Load a MIDI file into the engine and update the UI; returns whether the load succeeded.
+fn load_file(
+    engine: &Rc<RefCell<MidiEngine>>,
+    path: &str,
+    label_name: &gtk::Label,
+    main_stack: &gtk::Stack,
+    seek_adjustment: &gtk::Adjustment,
+    density_view: &MidiDensityView,
+    error_page: &adw::StatusPage,
+) -> bool {
+    let mut eng = engine.borrow_mut();
+    match eng.load(path) {
+        Ok(name) => {
+            let total = eng.total_length();
+            let peaks = eng.note_density_data(DENSITY_BINS);
+            eng.play();
+            drop(eng);
+            label_name.set_text(&name);
+            density_view.set_peaks(peaks);
+            density_view.set_position(0.0);
+            seek_adjustment.set_upper(total);
+            seek_adjustment.set_value(0.0);
+            main_stack.set_visible_child_name("main-view");
+            true
+        }
+        Err(e) => {
+            drop(eng);
+            error_page.set_description(Some(&e));
+            main_stack.set_visible_child_name("error-view");
+            false
+        }
+    }
+}
+
 fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let builder = gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/window.ui")));
 
@@ -63,8 +100,6 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
-    let _toast_overlay = get_object!(builder, "toast_overlay", adw::ToastOverlay);
-    let _drag_overlay = get_object!(builder, "drag_overlay", gtk::Overlay);
     let drag_revealer = get_object!(builder, "drag_revealer", gtk::Revealer);
     let main_content = get_object!(builder, "main_content", adw::ToolbarView);
     let error_page = get_object!(builder, "error_page", adw::StatusPage);
@@ -99,67 +134,65 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     // ── Drag & drop overlay ──
     {
-        let drag_revealer_w = drag_revealer;
-        let engine_d = engine.clone();
-        let label_name_d = label_name.clone();
-        let main_stack_d = main_stack.clone();
-        let seek_adjustment_d = seek_adjustment.clone();
-        let density_view_d = density_view.clone();
-        let error_page_d = error_page.clone();
-        let main_stack_d2 = main_stack.clone();
-
         let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
 
-        {
-            let drag_revealer = drag_revealer_w.clone();
-            let main_content = main_content.clone();
-            let dt = drop_target.clone();
-            drop_target.connect_notify_local(Some("current-drop"), move |_, _| {
-                let is_dragging = dt.current_drop().is_some();
-                drag_revealer.set_reveal_child(is_dragging);
-                if is_dragging {
-                    main_content.add_css_class("blurred");
-                } else {
-                    main_content.remove_css_class("blurred");
-                }
-            });
-        }
+        drop_target.connect_notify_local(
+            Some("current-drop"),
+            clone!(
+                #[strong]
+                drag_revealer,
+                #[strong]
+                main_content,
+                #[strong]
+                drop_target,
+                move |_, _| {
+                    let is_dragging = drop_target.current_drop().is_some();
+                    drag_revealer.set_reveal_child(is_dragging);
+                    if is_dragging {
+                        main_content.add_css_class("blurred");
+                    } else {
+                        main_content.remove_css_class("blurred");
+                    }
+                },
+            ),
+        );
 
-        drop_target.connect_drop(move |_target, value, _x, _y| {
-            let Ok(file_list) = value.get::<gdk::FileList>() else {
-                return false;
-            };
-            let files = file_list.files();
-            if let Some(file) = files.first() {
-                let path = file
-                    .path()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let mut eng = engine_d.borrow_mut();
-                match eng.load(&path) {
-                    Ok(name) => {
-                        let total = eng.total_length();
-                        let peaks = eng.note_density_data(300);
-                        eng.play();
-                        drop(eng);
-                        label_name_d.set_text(&name);
-                        density_view_d.set_peaks(peaks);
-                        density_view_d.set_position(0.0);
-                        seek_adjustment_d.set_upper(total);
-                        seek_adjustment_d.set_value(0.0);
-                        main_stack_d.set_visible_child_name("main-view");
-                        return true;
-                    }
-                    Err(e) => {
-                        drop(eng);
-                        error_page_d.set_description(Some(&e));
-                        main_stack_d2.set_visible_child_name("error-view");
-                    }
+        drop_target.connect_drop(clone!(
+            #[strong]
+            engine,
+            #[strong]
+            label_name,
+            #[strong]
+            main_stack,
+            #[strong]
+            seek_adjustment,
+            #[strong]
+            density_view,
+            #[strong]
+            error_page,
+            move |_target, value, _x, _y| {
+                let Ok(file_list) = value.get::<gdk::FileList>() else {
+                    return false;
+                };
+                if let Some(file) = file_list.files().first() {
+                    let path = file
+                        .path()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    return load_file(
+                        &engine,
+                        &path,
+                        &label_name,
+                        &main_stack,
+                        &seek_adjustment,
+                        &density_view,
+                        &error_page,
+                    );
                 }
-            }
-            false
-        });
+                false
+            },
+        ));
 
         window.add_controller(drop_target);
     }
@@ -264,82 +297,78 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     // ── Button callbacks ──
     {
-        let file_dialog = file_dialog.clone();
-        let engine = engine.clone();
-        let window = window.clone();
-        let label_name = label_name.clone();
-        let main_stack = main_stack.clone();
-        let seek_adjustment = seek_adjustment.clone();
-        let density_view = density_view.clone();
-        let error_page = error_page.clone();
-
-        let perform_load = {
-            let file_dialog = file_dialog.clone();
-            let engine = engine.clone();
-            let window = window.clone();
-            let label_name = label_name.clone();
-            let main_stack = main_stack.clone();
-            let seek_adjustment = seek_adjustment.clone();
-            let density_view = density_view.clone();
-            let error_page = error_page.clone();
+        let perform_load = clone!(
+            #[strong]
+            file_dialog,
+            #[strong]
+            engine,
+            #[strong]
+            window,
+            #[strong]
+            label_name,
+            #[strong]
+            main_stack,
+            #[strong]
+            seek_adjustment,
+            #[strong]
+            density_view,
+            #[strong]
+            error_page,
             move || {
-                let file_dialog = file_dialog.clone();
-                let engine = engine.clone();
-                let window = window.clone();
-                let label_name = label_name.clone();
-                let main_stack = main_stack.clone();
-                let seek_adjustment = seek_adjustment.clone();
-                let density_view = density_view.clone();
-                let error_page = error_page.clone();
-                glib::MainContext::default().spawn_local(async move {
-                    if let Ok(file) = file_dialog.open_future(Some(&window)).await {
-                        let path = file
-                            .path()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let mut eng = engine.borrow_mut();
-                        match eng.load(&path) {
-                            Ok(name) => {
-                                let total = eng.total_length();
-                                let peaks = eng.note_density_data(300);
-                                eng.play();
-                                drop(eng);
-                                label_name.set_text(&name);
-                                density_view.set_peaks(peaks);
-                                density_view.set_position(0.0);
-                                seek_adjustment.set_upper(total);
-                                seek_adjustment.set_value(0.0);
-                                main_stack.set_visible_child_name("main-view");
-                            }
-                            Err(e) => {
-                                drop(eng);
-                                error_page.set_description(Some(&e));
-                                main_stack.set_visible_child_name("error-view");
-                            }
+                glib::MainContext::default().spawn_local(clone!(
+                    #[strong]
+                    file_dialog,
+                    #[strong]
+                    engine,
+                    #[strong]
+                    window,
+                    #[strong]
+                    label_name,
+                    #[strong]
+                    main_stack,
+                    #[strong]
+                    seek_adjustment,
+                    #[strong]
+                    density_view,
+                    #[strong]
+                    error_page,
+                    async move {
+                        if let Ok(file) = file_dialog.open_future(Some(&window)).await {
+                            let path = file
+                                .path()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            load_file(
+                                &engine,
+                                &path,
+                                &label_name,
+                                &main_stack,
+                                &seek_adjustment,
+                                &density_view,
+                                &error_page,
+                            );
                         }
-                    }
-                });
-            }
-        };
+                    },
+                ));
+            },
+        );
 
-        btn_open.connect_clicked({
-            let load = perform_load.clone();
-            move |_| {
-                load();
-            }
-        });
-
-        btn_open_initial.connect_clicked({
-            let load = perform_load.clone();
-            move |_| {
-                load();
-            }
-        });
-
-        button_error_retry.connect_clicked(move |_| {
-            perform_load();
-        });
+        btn_open.connect_clicked(clone!(
+            #[strong]
+            perform_load,
+            move |_| perform_load(),
+        ));
+        btn_open_initial.connect_clicked(clone!(
+            #[strong]
+            perform_load,
+            move |_| perform_load(),
+        ));
+        button_error_retry.connect_clicked(clone!(
+            #[strong]
+            perform_load,
+            move |_| perform_load(),
+        ));
     }
 
     {
