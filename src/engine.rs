@@ -65,7 +65,7 @@ impl MidiEngine {
         let data = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
         let smf =
             midly::Smf::parse(&data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
-        let (events, total_length) = Self::flatten(&smf);
+        let (events, total_length) = Self::flatten(&smf)?;
 
         let file_name = std::path::Path::new(path)
             .file_name()
@@ -328,13 +328,15 @@ impl MidiEngine {
 
     // ── SMF flattening (adapted from rust-vst3-host/midi_player.rs) ──
 
-    fn flatten(smf: &midly::Smf) -> (Vec<(f64, MidiEvent)>, f64) {
+    fn flatten(smf: &midly::Smf) -> Result<(Vec<(f64, MidiEvent)>, f64), String> {
         let tpq = match smf.header.timing {
             Timing::Metrical(t) => t.as_int(),
-            Timing::Timecode { .. } => return (Vec::new(), 0.0),
+            Timing::Timecode { .. } => {
+                return Err("SMPTE timecode MIDI files are not supported".to_string());
+            }
         };
         if tpq == 0 {
-            return (Vec::new(), 0.0);
+            return Err("invalid MIDI timing: ticks per quarter note is 0".to_string());
         }
 
         // First pass: gather tempo changes and raw MIDI events
@@ -379,7 +381,7 @@ impl MidiEngine {
         events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
         let total_length = events.last().map(|(t, _)| *t).unwrap_or(0.0);
-        (events, total_length)
+        Ok((events, total_length))
     }
 
     fn seconds_for_tick(tick: u64, tpq: u16, tempo_map: &[(u64, u32)]) -> f64 {
