@@ -16,6 +16,7 @@ nix build && nix run .
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`, runs `application::PreludeApplication`.
 - `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` (compiled to GtkBuilder XML by `build.rs` into `OUT_DIR`); runs a `glib::timeout_add_local` tick loop every 20 ms.
 - `src/engine.rs` parses MIDI via `midly`, sends events via `midir`; handles play/pause/stop/seek/port management.
+- `src/midi_view.rs` is a custom `GtkWidget` subclass (`PreludeMidiDensityView`) rendered via `WidgetImpl::snapshot` (GtkSnapshot → GPU-accelerated render nodes); drag-to-scrub via `GestureDrag`. Played bars use the system accent color (`adw::StyleManager::accent_color_rgba`, non-deprecated), upcoming bars use the widget foreground color.
 - `ui/window.blp` (Blueprint) is the only UI definition file. Change it → `build.rs` recompiles it on the next `cargo build`.
 
 ## Dependencies (non-obvious)
@@ -24,6 +25,7 @@ nix build && nix run .
 |---|---|---|
 | `gtk4` | `=0.11.3` feat `v4_14` | exact pin |
 | `libadwaita` | `=0.9.1` feat `v1_8` | exact pin |
+| `graphene-rs` | `0.22` | `graphene::Rect` for `Snapshot::append_color` |
 | `midly` | `0.5` | MIDI file parser |
 | `midir` | `0.11` | MIDI output; requires `alsa-lib` at runtime on Linux |
 
