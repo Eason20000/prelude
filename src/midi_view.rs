@@ -200,7 +200,7 @@ impl MidiDensityView {
 
             cr.move_to(pixel_x, y0);
             cr.line_to(pixel_x, y1);
-            cr.stroke().unwrap();
+            let _ = cr.stroke();
         }
 
         cr.set_source_rgba(
@@ -212,6 +212,6 @@ impl MidiDensityView {
         cr.set_line_width(2.0);
         cr.move_to(center_x, 0.0);
         cr.line_to(center_x, h);
-        cr.stroke().unwrap();
+        let _ = cr.stroke();
     }
 }

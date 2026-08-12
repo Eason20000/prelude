@@ -5,6 +5,7 @@
   pkg-config,
   wrapGAppsHook4,
   blueprint-compiler,
+  clippy,
   gtk4,
   libadwaita,
   alsa-lib,
@@ -21,12 +22,19 @@ rustPlatform.buildRustPackage rec {
     pkg-config
     wrapGAppsHook4
     blueprint-compiler
+    clippy
   ];
   buildInputs = [
     gtk4
     libadwaita
     alsa-lib
   ];
+
+  doCheck = true;
+
+  postCheck = ''
+    cargo clippy --profile release --offline -- -D warnings
+  '';
 
   meta = {
     description = "A MIDI file player built with GTK4 and libadwaita";

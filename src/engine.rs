@@ -373,7 +373,7 @@ impl MidiEngine {
             .map(|(tick, ev)| (Self::seconds_for_tick(tick, tpq, &tempo_changes), ev))
             .collect();
 
-        events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        events.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         let total_length = events.last().map(|(t, _)| *t).unwrap_or(0.0);
         Ok((events, total_length))

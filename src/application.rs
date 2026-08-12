@@ -86,6 +86,9 @@ fn load_file(
     }
 }
 
+// Builder lookups must succeed — a missing widget means the UI template and
+// this code have drifted apart, so panicking is the correct failure mode.
+#[allow(clippy::expect_used)]
 fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let builder = gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/window.ui")));
 
@@ -94,8 +97,11 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     let provider = gtk::CssProvider::new();
     provider.load_from_string(include_str!("../ui/style.css"));
+    let Some(display) = gdk::Display::default() else {
+        panic!("no display available");
+    };
     gtk::style_context_add_provider_for_display(
-        &gdk::Display::default().expect("no display"),
+        &display,
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );

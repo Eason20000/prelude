@@ -5,6 +5,8 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=ui/window.blp");
 
+    // OUT_DIR is always set by cargo; failing means the build is misinvoked.
+    #[allow(clippy::expect_used)]
     let output = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set")).join("window.ui");
 
     let status = Command::new("blueprint-compiler")

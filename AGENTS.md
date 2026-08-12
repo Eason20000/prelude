@@ -31,12 +31,16 @@ nix build && nix run .
 
 | Command | Notes |
 |---|---|
-| `nix build` | standard build (runs checkPhase, no tests configured) |
+| `nix build . --option builders ''` | the **only** test gate — builds locally, runs `cargo test` (checkPhase) then `cargo clippy -- -D warnings` (postCheck). Never verify with bare `cargo ...` outside `nix develop`; `cargo` usage is limited to `cargo generate-lockfile` |
 | `nix flake check` | verifies flake evaluation + formatting |
 | `nix fmt` | format all files (Nix + Rust) via treefmt-nix |
 | `nix develop` | dev shell with `cargo build` / `cargo clippy` |
 
 There are no tests — no test directory, no test dependencies. Do not add testing infrastructure unless explicitly asked.
+
+## Lint
+
+`unwrap()` and `expect()` are **compile errors** (`unwrap_used`/`expect_used = deny` in `Cargo.toml`). All clippy warnings are fatal in postCheck (the `nix build` gate).
 
 ## Nix
 
