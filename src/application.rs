@@ -634,7 +634,7 @@ fn format_info(engine: &MidiEngine) -> String {
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = adw::AboutDialog::builder()
         .application_name("Prelude")
-        .version("0.1.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .developer_name("Eason20000")
         .license_type(gtk::License::Gpl30)
         .build();

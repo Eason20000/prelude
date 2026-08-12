@@ -36,7 +36,6 @@ pub(crate) struct MidiEngine {
     paused_since: Option<Instant>,
     elapsed: f64,
     total_length: f64,
-    file_path: String,
     file_name: String,
 }
 
@@ -52,7 +51,6 @@ impl MidiEngine {
             paused_since: None,
             elapsed: 0.0,
             total_length: 0.0,
-            file_path: String::new(),
             file_name: String::new(),
         }
     }
@@ -75,7 +73,6 @@ impl MidiEngine {
 
         self.events = events;
         self.total_length = total_length;
-        self.file_path = path.to_string();
         self.file_name = file_name;
 
         Ok(self.file_name.clone())
@@ -352,9 +349,7 @@ impl MidiEngine {
                         tempo_changes.push((abs_tick, us.as_int()));
                     }
                     TrackEventKind::Midi { channel, message } => {
-                        if let Some(e) = midi_message_to_event(channel.as_int(), message) {
-                            raw.push((abs_tick, e));
-                        }
+                        raw.push((abs_tick, midi_message_to_event(channel.as_int(), message)));
                     }
                     TrackEventKind::SysEx(data) => {
                         let mut sysex = Vec::with_capacity(data.len() + 2);
@@ -410,9 +405,9 @@ impl MidiEngine {
     }
 }
 
-fn midi_message_to_event(channel: u8, message: &MidiMessage) -> Option<MidiEvent> {
+fn midi_message_to_event(channel: u8, message: &MidiMessage) -> MidiEvent {
     let ch = channel;
-    Some(match message {
+    match message {
         MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => MidiEvent::NoteOff {
             channel: ch,
             key: key.as_int(),
@@ -450,7 +445,7 @@ fn midi_message_to_event(channel: u8, message: &MidiMessage) -> Option<MidiEvent
             channel: ch,
             pressure: vel.as_int(),
         },
-    })
+    }
 }
 
 /// Encode a MidiEvent into raw MIDI bytes for sending via midir.
