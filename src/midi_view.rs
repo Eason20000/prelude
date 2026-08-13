@@ -62,8 +62,9 @@ mod imp {
             let center_x = w / 2.0;
 
             let accent = adw::StyleManager::default().accent_color_rgba();
+            let foreground = widget.color();
             let played = accent.with_alpha(PLAYED_ALPHA);
-            let upcoming = widget.color().with_alpha(UPCOMING_ALPHA);
+            let upcoming = foreground.with_alpha(UPCOMING_ALPHA);
 
             let first_bar_x = center_x - self.position.get() * peaks.len() as f64 * BAR_SPACING;
 
@@ -93,7 +94,7 @@ mod imp {
             }
 
             snapshot.append_color(
-                &accent,
+                &foreground,
                 &graphene::Rect::new((center_x - 1.0) as f32, 0.0, 2.0, h as f32),
             );
         }
