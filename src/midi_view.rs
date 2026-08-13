@@ -27,6 +27,7 @@ mod imp {
         pub position: Cell<f64>,
         pub on_position_changed: RefCell<Option<PositionCallback>>,
         pub dragging: Cell<bool>,
+        pub accent_notify: RefCell<Option<glib::SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -160,6 +161,19 @@ impl MidiDensityView {
         ));
 
         view.add_controller(drag);
+
+        // The rendered colors come from AdwStyleManager (not from this widget's
+        // CSS), so GTK won't redraw us on accent changes by itself. Re-snapshot
+        // whenever the system accent color changes.
+        let style_manager = adw::StyleManager::default();
+        let accent_notify = style_manager.connect_accent_color_rgba_notify(clone!(
+            #[weak]
+            view,
+            move |_| {
+                view.queue_draw();
+            },
+        ));
+        *view.imp().accent_notify.borrow_mut() = Some(accent_notify);
 
         view
     }
