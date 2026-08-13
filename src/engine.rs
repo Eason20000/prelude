@@ -83,20 +83,10 @@ impl MidiEngine {
             return;
         }
 
-        match self.state {
-            State::Paused => {
-                if let Some(paused_at) = self.paused_since {
-                    // Advance start by pause duration so elapsed doesn't drift
-                    self.start = self.start.map(|s| s + paused_at.elapsed());
-                }
-                self.paused_since = None;
-            }
-            State::Stopped => {
-                self.start = Some(Instant::now() - Duration::from_secs_f64(self.elapsed));
-            }
-            _ => {}
-        }
-
+        // Anchor playback on the current elapsed — independent of how long we
+        // were paused or whether we sought while paused.
+        self.start = Some(Instant::now() - Duration::from_secs_f64(self.elapsed));
+        self.paused_since = None;
         self.state = State::Playing;
     }
 
@@ -137,12 +127,11 @@ impl MidiEngine {
             State::Playing => {
                 self.start = Some(Instant::now() - Duration::from_secs_f64(position));
             }
-            State::Paused => {
-                self.start = Some(Instant::now() - Duration::from_secs_f64(position));
-            }
             State::Stopped => {
                 self.start = None;
             }
+            // Paused: nothing to anchor — play() re-anchors from elapsed.
+            State::Paused => {}
         }
     }
 
