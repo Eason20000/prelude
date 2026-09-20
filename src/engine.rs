@@ -26,6 +26,38 @@ pub enum State {
     Paused,
 }
 
+/// A bar (measure) boundary in seconds, used by the page-turn view.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Measure {
+    pub start: f64,
+    pub end: f64,
+    /// Seconds per quarter note within this measure (tempo-aware).
+    pub quarter: f64,
+}
+
+/// A played note with its timing, used by the page-turn view.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NoteData {
+    pub time: f64,
+    pub duration: f64,
+    pub midi: u8,
+    pub channel: u8,
+}
+
+/// Timing data needed to rebuild the measure map after flattening.
+struct SmfTiming {
+    tpq: u16,
+    tempos: Vec<(u64, u32)>,
+    meters: Vec<(u64, u8, u8)>,
+}
+
+/// A parsed SMF: sorted event stream, total length and timing data.
+struct ParsedSmf {
+    events: Vec<(f64, MidiEvent)>,
+    total_length: f64,
+    timing: SmfTiming,
+}
+
 pub(crate) struct MidiEngine {
     events: Vec<(f64, MidiEvent)>,
     next_idx: usize,
@@ -37,6 +69,8 @@ pub(crate) struct MidiEngine {
     elapsed: f64,
     total_length: f64,
     file_name: String,
+    measures: Vec<Measure>,
+    notes: Vec<NoteData>,
 }
 
 impl MidiEngine {
@@ -52,27 +86,40 @@ impl MidiEngine {
             elapsed: 0.0,
             total_length: 0.0,
             file_name: String::new(),
+            measures: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
     // ── Public API ──────────────────────────────────────────────
 
     pub(crate) fn load(&mut self, path: &str) -> Result<String, String> {
-        self.stop();
-
+        // Parse everything into locals first: a failed load must not disturb
+        // the currently playing song (no stop(), no partial state).
         let data = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
         let smf =
             midly::Smf::parse(&data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
-        let (events, total_length) = Self::flatten(&smf)?;
-
+        let parsed = Self::flatten(&smf)?;
+        let timing = parsed.timing;
+        let measures = Self::calculate_measure_map(
+            timing.tpq,
+            &timing.tempos,
+            &timing.meters,
+            parsed.total_length,
+        );
+        let notes = Self::note_intervals(&parsed.events, parsed.total_length);
         let file_name = std::path::Path::new(path)
             .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
+            .map(|s| s.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| path.to_string());
 
-        self.events = events;
-        self.total_length = total_length;
+        self.stop();
+        self.measures = measures;
+        self.notes = notes;
+
+        self.events = parsed.events;
+        self.total_length = parsed.total_length;
         self.file_name = file_name;
 
         Ok(self.file_name.clone())
@@ -81,6 +128,14 @@ impl MidiEngine {
     pub(crate) fn play(&mut self) {
         if self.events.is_empty() || self.state == State::Playing {
             return;
+        }
+
+        // Rewind when starting from the end of the file: without this,
+        // pressing play at EOF would anchor start = now - total and hit EOF
+        // again on the next tick, appearing completely unresponsive.
+        if self.total_length > 0.0 && self.elapsed >= self.total_length {
+            self.elapsed = 0.0;
+            self.next_idx = 0;
         }
 
         // Anchor playback on the current elapsed — independent of how long we
@@ -95,6 +150,16 @@ impl MidiEngine {
             return;
         }
         self.all_notes_off();
+        // Snap elapsed to frame precision instead of freezing it at the last
+        // 20 ms tick value (up to one tick of drift). Advance next_idx past
+        // the skipped span so resume doesn't burst-play the unheard events.
+        if let Some(start) = self.start {
+            self.elapsed = Instant::now()
+                .saturating_duration_since(start)
+                .as_secs_f64()
+                .min(self.total_length);
+            self.next_idx = self.events.partition_point(|(t, _)| *t <= self.elapsed);
+        }
         self.paused_since = Some(Instant::now());
         self.state = State::Paused;
     }
@@ -116,6 +181,10 @@ impl MidiEngine {
     }
 
     pub(crate) fn seek(&mut self, position: f64) {
+        // clamp() lets NaN through and Duration::from_secs_f64 panics on it.
+        if !position.is_finite() {
+            return;
+        }
         let position = position.clamp(0.0, self.total_length);
         self.all_notes_off();
 
@@ -189,50 +258,28 @@ impl MidiEngine {
         &self.file_name
     }
 
+    pub(crate) fn measures(&self) -> &[Measure] {
+        &self.measures
+    }
+
+    pub(crate) fn notes(&self) -> &[NoteData] {
+        &self.notes
+    }
+
     pub(crate) fn note_density_data(&self, bins: usize) -> Vec<f64> {
-        if self.events.is_empty() || self.total_length <= 0.0 || bins == 0 {
-            return vec![0.0; bins];
-        }
-
-        let mut intervals: Vec<(f64, f64)> = Vec::new();
-        let mut pending: Vec<(u8, u8, f64)> = Vec::new();
-
-        for (t, ev) in &self.events {
-            match ev {
-                MidiEvent::NoteOn {
-                    channel,
-                    key,
-                    velocity,
-                } if *velocity > 0 => {
-                    pending.push((*channel, *key, *t));
-                }
-                MidiEvent::NoteOff { channel, key, .. } => {
-                    if let Some(pos) = pending
-                        .iter()
-                        .position(|(ch, k, _)| *ch == *channel && *k == *key)
-                    {
-                        let (_, _, start) = pending.remove(pos);
-                        intervals.push((start, *t));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        for (_, _, start) in &pending {
-            intervals.push((*start, self.total_length));
-        }
-
-        if intervals.is_empty() {
+        // Reuse the cached note intervals from load() instead of re-pairing
+        // NoteOn/NoteOff here (the old duplicated pairing logic has drifted
+        // from note_intervals before and must not fork again).
+        if self.notes.is_empty() || self.total_length <= 0.0 || bins == 0 {
             return vec![0.0; bins];
         }
 
         let bin_width = self.total_length / bins as f64;
         let mut density = vec![0.0; bins];
 
-        for (start, end) in intervals {
-            let start_bin = (start / bin_width).floor() as isize;
-            let end_bin = (end / bin_width).ceil() as isize;
+        for n in &self.notes {
+            let start_bin = (n.time / bin_width).floor() as isize;
+            let end_bin = ((n.time + n.duration) / bin_width).ceil() as isize;
             for i in start_bin.max(0)..end_bin.min(bins as isize) {
                 density[i as usize] += 1.0;
             }
@@ -301,6 +348,9 @@ impl MidiEngine {
     // ── Internal ────────────────────────────────────────────────
 
     fn all_notes_off(&mut self) {
+        if self.port.is_none() {
+            return;
+        }
         if let Some(ref mut port) = self.port {
             for ch in 0..16u8 {
                 for (cc, desc) in [(123, "all notes off"), (120, "all sound off")] {
@@ -314,7 +364,10 @@ impl MidiEngine {
 
     // ── SMF flattening (adapted from rust-vst3-host/midi_player.rs) ──
 
-    fn flatten(smf: &midly::Smf) -> Result<(Vec<(f64, MidiEvent)>, f64), String> {
+    /// Flatten the SMF into a sorted event stream plus the timing data needed
+    /// to build the measure map: ticks per quarter, tempo changes (tick domain)
+    /// and time signature changes (tick domain).
+    fn flatten(smf: &midly::Smf) -> Result<ParsedSmf, String> {
         let tpq = match smf.header.timing {
             Timing::Metrical(t) => t.as_int(),
             Timing::Timecode { .. } => {
@@ -325,8 +378,9 @@ impl MidiEngine {
             return Err("invalid MIDI timing: ticks per quarter note is 0".to_string());
         }
 
-        // First pass: gather tempo changes and raw MIDI events
+        // First pass: gather tempo changes, time signatures and raw MIDI events
         let mut tempo_changes: Vec<(u64, u32)> = vec![(0, 500_000)];
+        let mut meters: Vec<(u64, u8, u8)> = Vec::new();
         let mut raw: Vec<(u64, MidiEvent)> = Vec::new();
 
         for track in &smf.tracks {
@@ -336,6 +390,9 @@ impl MidiEngine {
                 match &ev.kind {
                     TrackEventKind::Meta(MetaMessage::Tempo(us)) => {
                         tempo_changes.push((abs_tick, us.as_int()));
+                    }
+                    TrackEventKind::Meta(MetaMessage::TimeSignature(num, den, _, _)) => {
+                        meters.push((abs_tick, *num, *den));
                     }
                     TrackEventKind::Midi { channel, message } => {
                         raw.push((abs_tick, midi_message_to_event(channel.as_int(), message)));
@@ -355,6 +412,7 @@ impl MidiEngine {
         }
 
         tempo_changes.sort_by_key(|&(t, _)| t);
+        meters.sort_by_key(|&(t, _, _)| t);
 
         // Second pass: convert ticks to seconds, then sort by time
         let mut events: Vec<(f64, MidiEvent)> = raw
@@ -365,7 +423,125 @@ impl MidiEngine {
         events.sort_by(|a, b| a.0.total_cmp(&b.0));
 
         let total_length = events.last().map(|(t, _)| *t).unwrap_or(0.0);
-        Ok((events, total_length))
+        Ok(ParsedSmf {
+            events,
+            total_length,
+            timing: SmfTiming {
+                tpq,
+                tempos: tempo_changes,
+                meters,
+            },
+        })
+    }
+
+    /// Build the measure map in seconds, honoring tempo and meter changes.
+    /// Falls back to 4/4 at 120 BPM when no tempo/meter is present.
+    fn calculate_measure_map(
+        tpq: u16,
+        tempo_changes: &[(u64, u32)],
+        meters: &[(u64, u8, u8)],
+        total_length: f64,
+    ) -> Vec<Measure> {
+        let mut sorted_meters: Vec<(u64, u8, u8)> = meters.to_vec();
+        sorted_meters.sort_by_key(|&(t, _, _)| t);
+        if sorted_meters.is_empty() {
+            sorted_meters.push((0, 4, 2));
+        }
+        if sorted_meters[0].0 > 0 {
+            sorted_meters.insert(0, (0, 4, 2));
+        }
+
+        let mut measures = Vec::new();
+        let mut current_tick: u64 = 0;
+        let mut current_time: f64 = 0.0;
+        let mut meter_idx = 0usize;
+
+        loop {
+            while meter_idx + 1 < sorted_meters.len()
+                && current_tick >= sorted_meters[meter_idx + 1].0
+            {
+                meter_idx += 1;
+            }
+            let (_, num, den_pow) = sorted_meters[meter_idx];
+            let num = (num as u64).max(1);
+            let den = 1u64 << den_pow.min(16);
+            let ticks_per_measure = num * tpq as u64 * 4 / den;
+            if ticks_per_measure == 0 {
+                // Degenerate timing (e.g. tiny PPQ with a large denominator):
+                // don't loop forever appending zero-length measures.
+                break;
+            }
+
+            let end_tick = current_tick + ticks_per_measure;
+            let end_time = Self::seconds_for_tick(end_tick, tpq, tempo_changes).max(current_time);
+            let beats = num as f64 * 4.0 / den as f64;
+
+            measures.push(Measure {
+                start: current_time,
+                end: end_time,
+                quarter: (end_time - current_time) / beats,
+            });
+
+            current_tick = end_tick;
+            current_time = end_time;
+
+            if current_time > total_length + 5.0 {
+                break;
+            }
+        }
+
+        if measures.is_empty() {
+            measures.push(Measure {
+                start: 0.0,
+                end: total_length.max(2.0),
+                quarter: total_length.max(2.0) / 4.0,
+            });
+        }
+        measures
+    }
+
+    /// Pair NoteOn/NoteOff events into note intervals; dangling NoteOns are
+    /// extended to the end of the file.
+    fn note_intervals(events: &[(f64, MidiEvent)], total_length: f64) -> Vec<NoteData> {
+        let mut pending: Vec<(u8, u8, f64)> = Vec::new();
+        let mut notes = Vec::new();
+
+        for (t, ev) in events {
+            match ev {
+                MidiEvent::NoteOn {
+                    channel,
+                    key,
+                    velocity,
+                } if *velocity > 0 => pending.push((*channel, *key, *t)),
+                MidiEvent::NoteOff { channel, key, .. } => {
+                    if let Some(pos) = pending
+                        .iter()
+                        .position(|(ch, k, _)| *ch == *channel && *k == *key)
+                    {
+                        let (channel, key, start) = pending.remove(pos);
+                        notes.push(NoteData {
+                            time: start,
+                            duration: (t - start).max(0.0),
+                            midi: key,
+                            channel,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (channel, key, start) in &pending {
+            notes.push(NoteData {
+                time: *start,
+                duration: (total_length - start).max(0.0),
+                midi: *key,
+                channel: *channel,
+            });
+        }
+
+        notes.sort_by(|a, b| a.time.total_cmp(&b.time));
+        notes
     }
 
     fn seconds_for_tick(tick: u64, tpq: u16, tempo_map: &[(u64, u32)]) -> f64 {

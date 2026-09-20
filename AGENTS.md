@@ -24,7 +24,36 @@ nix build && nix run .
   play/pause/stop/seek/port management. `play()` re-anchors
   `start = now - elapsed` for both Paused and Stopped (the old pause-duration
   compensation was deliberately removed — don't restore it). SMPTE/timecode
-  files are rejected at load with an error.
+  files are rejected at load with an error. At load it also builds a measure map
+  (tempo + time signature aware) and note intervals, exposed via `measures()` /
+  `notes()` for the page-turn view.
+- `src/page_view.rs` is a second custom `GtkWidget` subclass
+  (`PreludePageTurnView`) — the P5 "kashiwade" page-turn visual. Dual-view
+  layout in `view_root` (top to bottom): page-turn canvas (prepended, `vexpand`,
+  eats all extra space), density strip (`insert_child_after` the page view,
+  `vexpand(false)` so it keeps its natural height, full width), control bar
+  (`Adw.Clamp`, `valign: end`). Renders via `WidgetImpl::snapshot` (GPU render
+  nodes, `append_color` only — no Cairo).
+  - Driven by its **own `gtk::WidgetExt::add_tick_callback`** frame loop
+    (display-refresh synchronized), independent of the 20 ms timeout loop.
+  - Page-turn transition: on a forward page change the old page's notes are
+    cached; after `SHRINK_INTERVAL_MS` a persistent `adw::SpringAnimation` (0→1,
+    `SHRINK_*` params) drives the left-to-right shrink via
+    `CallbackAnimationTarget`. Note growth is a **per-note fire-and-forget**
+    `adw::SpringAnimation` (own `GROWTH_*` params) writing the note's `scale`
+    cell (`Rc<Cell<f64>>`, fresh per cache rebuild); stale springs only touch
+    orphaned cells. Growth `mass` is scaled by the note's visible length in
+    quarter-note units (`Measure.quarter`, tempo-aware — one quarter note = 1×),
+    so longer notes grow in more slowly. Note colors keep the accent hue with a
+    deterministic per-channel lightness/saturation deviation
+    (`TRACK_*_DEVIATION`, `track_color()` in HSL space). Both springs use a
+    tight `*_EPSILON` so bars settle essentially exactly at full width. **No
+    bezier easing anywhere** — spring physics only. All tunables are
+    compile-time `const`s at the top of the file, never runtime settings.
+    (`kashiwade` is the original composer's name; constants use the
+    GROWTH/SHRINK scheme.)
+  - Seek/jump clears the previous-page cache (no transition). Same accent redraw
+    wiring as `midi_view.rs` (accent notify handler held in `imp`).
 - `src/midi_view.rs` is a custom `GtkWidget` subclass (`PreludeMidiDensityView`)
   rendered via `WidgetImpl::snapshot` (GtkSnapshot → GPU-accelerated render
   nodes); drag-to-scrub via `GestureDrag`. Played bars use the system accent

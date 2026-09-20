@@ -2,8 +2,8 @@ using Gtk 4.0;
 using Adw 1;
 
 Adw.ApplicationWindow window_main {
-  default-height: 480;
-  default-width: 640;
+  default-height: 640;
+  default-width: 480;
   title: "Prelude";
 
   Adw.BottomSheet info_sheet {
@@ -120,7 +120,7 @@ Adw.ApplicationWindow window_main {
             StackPage {
               name: "main-view";
 
-              child: Box {
+              child: Box view_root {
                 orientation: vertical;
                 vexpand: true;
                 spacing: 12;
@@ -131,13 +131,10 @@ Adw.ApplicationWindow window_main {
 
                 Adw.Clamp {
                   maximum-size: 480;
-                  vexpand: true;
-                  valign: fill;
+                  valign: end;
 
-                  child: Box main_inner_box {
+                  child: Box {
                     orientation: vertical;
-                    vexpand: true;
-                    valign: center;
                     spacing: 12;
 
                     Label label_name {

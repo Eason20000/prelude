@@ -1,6 +1,7 @@
 mod application;
 mod engine;
 mod midi_view;
+mod page_view;
 
 use adw::prelude::*;
 

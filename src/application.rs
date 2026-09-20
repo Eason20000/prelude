@@ -12,6 +12,7 @@ use adw::prelude::*;
 
 use crate::engine::{MidiEngine, State};
 use crate::midi_view::MidiDensityView;
+use crate::page_view::PageTurnView;
 
 const TICK_INTERVAL_MS: u32 = 20;
 const SEEK_STEP: f64 = 5.0;
@@ -52,16 +53,27 @@ fn select_port(dropdown: &gtk::DropDown, ports: &[String], current: Option<&str>
     }
 }
 
+/// Widgets that `load_file` updates after a successful load.
+struct FileLoadUi<'a> {
+    label_name: &'a gtk::Label,
+    main_stack: &'a gtk::Stack,
+    seek_adjustment: &'a gtk::Adjustment,
+    density_view: &'a MidiDensityView,
+    page_view: &'a PageTurnView,
+    error_page: &'a adw::StatusPage,
+}
+
 /// Load a MIDI file into the engine and update the UI; returns whether the load succeeded.
-fn load_file(
-    engine: &Rc<RefCell<MidiEngine>>,
-    path: &str,
-    label_name: &gtk::Label,
-    main_stack: &gtk::Stack,
-    seek_adjustment: &gtk::Adjustment,
-    density_view: &MidiDensityView,
-    error_page: &adw::StatusPage,
-) -> bool {
+fn load_file(engine: &Rc<RefCell<MidiEngine>>, path: &str, ui: FileLoadUi<'_>) -> bool {
+    // Non-local GFiles surface as "" via path().unwrap_or_default() at the
+    // call sites; report that directly instead of a generic read error.
+    if path.is_empty() {
+        ui.error_page.set_description(Some(
+            "Could not resolve the dropped/selected file path (non-local file?).",
+        ));
+        ui.main_stack.set_visible_child_name("error-view");
+        return false;
+    }
     let mut eng = engine.borrow_mut();
     match eng.load(path) {
         Ok(name) => {
@@ -69,18 +81,19 @@ fn load_file(
             let peaks = eng.note_density_data(DENSITY_BINS);
             eng.play();
             drop(eng);
-            label_name.set_text(&name);
-            density_view.set_peaks(peaks);
-            density_view.set_position(0.0);
-            seek_adjustment.set_upper(total);
-            seek_adjustment.set_value(0.0);
-            main_stack.set_visible_child_name("main-view");
+            ui.label_name.set_text(&name);
+            ui.density_view.set_peaks(peaks);
+            ui.density_view.set_position(0.0);
+            ui.page_view.reset();
+            ui.seek_adjustment.set_upper(total);
+            ui.seek_adjustment.set_value(0.0);
+            ui.main_stack.set_visible_child_name("main-view");
             true
         }
         Err(e) => {
             drop(eng);
-            error_page.set_description(Some(&e));
-            main_stack.set_visible_child_name("error-view");
+            ui.error_page.set_description(Some(&e));
+            ui.main_stack.set_visible_child_name("error-view");
             false
         }
     }
@@ -125,9 +138,15 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let btn_open_initial = get_object!(builder, "button_open_initial", gtk::Button);
     let btn_stop = get_object!(builder, "button_stop", gtk::Button);
 
-    let main_inner_box = get_object!(builder, "main_inner_box", gtk::Box);
+    let view_root = get_object!(builder, "view_root", gtk::Box);
     let density_view = MidiDensityView::new();
-    main_inner_box.insert_child_after(density_view.widget(), Some(&label_name));
+
+    // Dual-view layout, top to bottom: page-turn canvas (eats all extra
+    // space), density strip (natural height, full width), control bar.
+    let page_view = PageTurnView::new(engine.clone());
+    view_root.prepend(page_view.widget());
+    density_view.set_vexpand(false);
+    view_root.insert_child_after(density_view.widget(), Some(page_view.widget()));
 
     // ── Density view position changed → seek ──
     density_view.set_on_position_changed(clone!(
@@ -176,6 +195,8 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
             #[strong]
             density_view,
             #[strong]
+            page_view,
+            #[strong]
             error_page,
             move |_target, value, _x, _y| {
                 let Ok(file_list) = value.get::<gdk::FileList>() else {
@@ -190,11 +211,14 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                     return load_file(
                         &engine,
                         &path,
-                        &label_name,
-                        &main_stack,
-                        &seek_adjustment,
-                        &density_view,
-                        &error_page,
+                        FileLoadUi {
+                            label_name: &label_name,
+                            main_stack: &main_stack,
+                            seek_adjustment: &seek_adjustment,
+                            density_view: &density_view,
+                            page_view: &page_view,
+                            error_page: &error_page,
+                        },
                     );
                 }
                 false
@@ -334,6 +358,8 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
             #[strong]
             density_view,
             #[strong]
+            page_view,
+            #[strong]
             error_page,
             move || {
                 glib::MainContext::default().spawn_local(clone!(
@@ -352,6 +378,8 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                     #[strong]
                     density_view,
                     #[strong]
+                    page_view,
+                    #[strong]
                     error_page,
                     async move {
                         if let Ok(file) = file_dialog.open_future(Some(&window)).await {
@@ -363,11 +391,14 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                             load_file(
                                 &engine,
                                 &path,
-                                &label_name,
-                                &main_stack,
-                                &seek_adjustment,
-                                &density_view,
-                                &error_page,
+                                FileLoadUi {
+                                    label_name: &label_name,
+                                    main_stack: &main_stack,
+                                    seek_adjustment: &seek_adjustment,
+                                    density_view: &density_view,
+                                    page_view: &page_view,
+                                    error_page: &error_page,
+                                },
                             );
                         }
                     },
@@ -431,11 +462,15 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         seek_adjustment,
         #[strong]
         density_view,
+        #[strong]
+        page_view,
         move |_| {
             engine.borrow_mut().stop();
             label_position.set_text("0:00");
             seek_adjustment.set_value(0.0);
             density_view.set_position(0.0);
+            // "Stop" means back to the initial state, not a frozen frame.
+            page_view.reset();
         },
     ));
 
@@ -558,28 +593,29 @@ fn start_tick_loop(
             #[strong]
             label_length,
             move || {
-                let mut eng = engine.borrow_mut();
-                let state = eng.state();
+                // Short borrows only: never hold the engine across MIDI I/O
+                // or widget updates.
+                let state = engine.borrow().state();
 
                 if state == State::Playing {
-                    let due = eng.tick();
+                    let due = engine.borrow_mut().tick();
                     for ev in &due {
-                        eng.send_event(ev);
+                        engine.borrow_mut().send_event(ev);
                     }
                 }
 
-                let total = eng.total_length();
+                let total = engine.borrow().total_length();
                 let scale_active = seek_scale.state_flags().contains(gtk::StateFlags::ACTIVE);
 
                 if !scale_active {
                     // dragged then released — seek once to final position
                     if was_scale_active.get() {
                         was_scale_active.set(false);
-                        eng.seek(seek_adjustment.value());
+                        engine.borrow_mut().seek(seek_adjustment.value());
                     }
                     if !density_view.is_dragging() {
                         if state == State::Playing {
-                            let elapsed = eng.elapsed();
+                            let elapsed = engine.borrow().elapsed();
                             seek_adjustment.set_value(elapsed);
                             if total > 0.0 {
                                 density_view.set_position(elapsed / total);
@@ -595,14 +631,18 @@ fn start_tick_loop(
                     }
                 }
 
-                if state == State::Playing && eng.state() != State::Playing {
-                    eng.stop();
-                }
-
-                let elapsed = eng.elapsed();
+                // NOTE: deliberately no re-stop() at EOF. engine.tick() parks
+                // the state at Stopped/elapsed=total ("stay at the end"); an
+                // extra stop() here would rewind to 0:00 and flash the labels
+                // and the page view back to the first page every time a file
+                // ends. Replay-from-end rewinds in play() instead.
+                let elapsed = engine.borrow().elapsed();
                 label_position.set_text(&format_time(elapsed));
                 label_length.set_text(&format_time(total));
-                update_transport_button(&eng, &btn_start_stop);
+                {
+                    let eng = engine.borrow();
+                    update_transport_button(&eng, &btn_start_stop);
+                }
 
                 glib::ControlFlow::Continue
             },
