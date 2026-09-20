@@ -123,6 +123,12 @@ must be held (in `imp`) or the connection is dropped.
 - `nix run .` works via `meta.mainProgram`; there is no `apps` output.
 - Both `Cargo.lock` and `flake.lock` are committed.
 
+## Deferred work
+
+`TODOS.md` tracks all deferred and open items with full context (location,
+issue, expected behavior, rationale). Read it before adding new visuals or
+parser changes. `README.md` intentionally has no roadmap.
+
 ## Constraints
 
 - **UI template is compiled in**: `ui/window.blp` → `build.rs` → GtkBuilder XML
