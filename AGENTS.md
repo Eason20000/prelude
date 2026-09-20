@@ -15,11 +15,16 @@ nix build && nix run .
 - Single crate at repo root (no workspace).
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`,
   runs `application::PreludeApplication`.
-- `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp`
-  (compiled to GtkBuilder XML by `build.rs` into `OUT_DIR`); runs a
-  `glib::timeout_add_local` tick loop every 20 ms. Scale seeks are **deferred to
-  release** (`was_scale_active` flag): don't seek on every `change-value` while
-  dragging — it spams `all_notes_off`.
+- `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` and
+  `ui/port_settings.blp` (both compiled to GtkBuilder XML by `build.rs` into
+  `OUT_DIR`); `load_file` strips any extension via `Path::file_stem()` for
+  `label_name` only (`engine.file_name` keeps the extension for the info sheet).
+  Runs a `glib::timeout_add_local` tick loop every 20 ms. Scale seeks are
+  **deferred to release** (`was_scale_active` flag): don't seek on every
+  `change-value` while dragging — it spams `all_notes_off`. Port settings are an
+  adaptive `Adw.PreferencesDialog` (`ui/port_settings.blp` → `Adw.ComboRow` +
+  `StringList` injected via `PropertyExpression(StringObject:string)`) presented
+  via `AdwDialogExt::present()`, floating on desktop / bottom-sheet on mobile.
 - `src/engine.rs` parses MIDI via `midly`, sends events via `midir`; handles
   play/pause/stop/seek/port management. `play()` re-anchors
   `start = now - elapsed` for both Paused and Stopped (the old pause-duration
@@ -29,11 +34,14 @@ nix build && nix run .
   `notes()` for the page-turn view.
 - `src/page_view.rs` is a second custom `GtkWidget` subclass
   (`PreludePageTurnView`) — the P5 "kashiwade" page-turn visual. Dual-view
-  layout in `view_root` (top to bottom): page-turn canvas (prepended, `vexpand`,
-  eats all extra space), density strip (`insert_child_after` the page view,
-  `vexpand(false)` so it keeps its natural height, full width), control bar
-  (`Adw.Clamp`, `valign: end`). Renders via `WidgetImpl::snapshot` (GPU render
-  nodes, `append_color` only — no Cairo).
+  layout in `view_root` (top to bottom): file title `Label label_name` (top-left
+  `xalign 0.0` `ellipsize end` `title-1`, display stripped via `file_stem`),
+  page-turn canvas (inside `Box page_view_placeholder[vexpand true]` which
+  `append`s the widget, eats all extra space), density strip (inside
+  `Box density_view_placeholder[vexpand false]` which `append`s the widget,
+  natural `48` height, full width), control bar (`Adw.Clamp`, `valign: end`).
+  Renders via `WidgetImpl::snapshot` (GPU render nodes, `append_color` only — no
+  Cairo).
   - Driven by its **own `gtk::WidgetExt::add_tick_callback`** frame loop
     (display-refresh synchronized), independent of the 20 ms timeout loop.
   - Page-turn transition: on a forward page change the old page's notes are
@@ -56,9 +64,12 @@ nix build && nix run .
     wiring as `midi_view.rs` (accent notify handler held in `imp`).
 - `src/midi_view.rs` is a custom `GtkWidget` subclass (`PreludeMidiDensityView`)
   rendered via `WidgetImpl::snapshot` (GtkSnapshot → GPU-accelerated render
-  nodes); drag-to-scrub via `GestureDrag`. Played bars use the system accent
-  color (`adw::StyleManager::accent_color_rgba`, non-deprecated), upcoming bars
-  and the playhead use the widget foreground color.
+  nodes, `CONTENT_HEIGHT` halved to `48` for the strip); drag-to-scrub via
+  `GestureDrag`. Played bars use the system accent color
+  (`adw::StyleManager::accent_color_rgba`, non-deprecated), upcoming bars and
+  the playhead use the widget foreground color. The placeholder `Box`
+  `density_view_placeholder[vexpand false]` owns the outer `vexpand`, the widget
+  itself is appended via `append` (no `remove`/`prepend` dance).
   - Drag is **content-grab** (drag right = rewind) — an intentional
     record-player model, not a bug; don't "fix" the sign.
   - GTK never auto-redraws this widget on accent changes (accent is not part of
@@ -68,8 +79,10 @@ nix build && nix run .
     `@implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget`, and
     `WidgetImpl::measure` returns
     `(min, natural, min_baseline, natural_baseline)`.
-- `ui/window.blp` (Blueprint) is the only UI definition file. Change it →
-  `build.rs` recompiles it on the next `cargo build`.
+- `ui/window.blp` and `ui/port_settings.blp` (Blueprint) are the two UI
+  definition files — `view_root` now declares `label_name` +
+  `page/density_placeholder` parents via `append`, not `remove`/`prepend`.
+  Change either → `build.rs` recompiles on the next `cargo build`.
 
 ## Dependencies (non-obvious)
 
@@ -135,6 +148,7 @@ parser changes. `README.md` intentionally has no roadmap.
   embedded via `include_str`; the generated `.ui` is never committed.
 - **`build.rs` exists only to invoke `blueprint-compiler`** (a deliberate
   exception to the general no-build.rs policy — Blueprint needs a compile step).
+  It now compiles **both** `ui/window.blp` and `ui/port_settings.blp`.
   `blueprint-compiler` must be in `nativeBuildInputs` (package) / devShell.
 - **No CI** — no workflows in `.github/workflows/`.
 - **App is GPL-3.0-only**; license must be preserved on reuse.

@@ -170,13 +170,66 @@ ______________________________________________________________________
 - **期望**：状态机中在 seek 时回放此前最后的 CC/Program 快照，或文档注明不支持。
 - **为何**：朴素播放器经典债，修需状态快照，延期到状态机更合适，P3。
 
-### C2. `view_root` 插入顺序靠约定 — `src/application.rs:141-149, ui/window.blp:123`
+### C2. `view_root` 插入顺序靠约定 — `src/application.rs:141-149, ui/window.blp:123` — **已在本轮修复**
 
-- **上下文**：`prepend(page)` + `insert_child_after(density, page)` 得
+- **上下文**：此前 `prepend(page)` + `insert_child_after(density, page)` 得
   `[page, density, Clamp]`，`view_root` 在 `.blp` 中无占位，`vexpand` 仅代码设。
 - **错误点**：Blueprint 编辑器不可见，布局依赖代码约定。
-- **期望**：在 `.blp` 留占位注释或把 `vexpand` 收进模板。
-- **为何**：P3 可维护性。
+- **本次修复**：`ui/window.blp:123-153` 新增
+  `Label label_name[xalign 0.0 ellipsize end title-1 顶置]` +
+  `Box page/density_placeholder[vexpand true/false]`
+  作为父容器；`src/application.rs:150-156` 改为 `placeholder.append(child)`，顺序即声明式
+  `[label, page_ph→page, density_ph→density, Clamp]`，不再 `remove/prepend`。`TODOS`
+  保留以记录决策，`AGENTS.md` 已同步。
+- **为何**：P3 可维护性，已闭环。
+
+### C3. `GFile.path().unwrap_or_default()` 掩盖真因 — `src/application.rs:206-210,386-390`
+
+### C4. Port 选择触发 `RefCell` panic（本次 review 发现，`HEAD` 已潜伏）— `src/application.rs:288-304,563-576` / `src/application.rs:46-58` / `src/application.rs:310-322`
+
+- **上下文**：`port_row`/`port_dropdown` 的 `selected` 属性通过 `StringList`
+  绑定；`populate_ports()` 中 `splice` 或 `select_port()` 中 `set_selected()` 会同步发射
+  `selected_notify`，而调用点 `port_action` 与启动时 `Refresh ports` 块在 `engine.borrow()`
+  的不可变借用仍存活期间调用 `select_port`。
+- **错误点**：`src/application.rs:290-292` / `src/application.rs:564` 的
+  `let current = engine.borrow(); select_port(&port_row, &ports, current.port_name());`
+  中 `current: Ref` 存活进入 `select_port:46` 的 `row.set_selected()`，同步回调
+  `port_row.connect_selected_notify:310` 内 `engine.borrow_mut().open_port()` 导致
+  `already borrowed` panic。`HEAD:278-279` 对 `DropDown` 已同形，本次 `ComboRow`
+  仅复现，未放大。
+- **期望**：借用与 `set_selected`
+  分离：`let cur = engine.borrow().port_name().map(|s| s.to_string()); drop` 后再
+  `select_port(&port_row, &ports, cur.as_deref())`；或将 `populate_ports` 的
+  `splice` 与选择分离为两阶段。
+- **为何**：`RefCell` panic 为高严重，虽需特定 `current Some` 且与当前 `selected` 不同才触发，但
+  `selected` 同步发射决定不可控，`sanity check` 已报，需在下次触及 `application.rs` 时单行修复，优先级
+  P1，暂列延期以免阻塞本次视觉变更。
+
+### C5. 刷新端口总是重置为 `0`（本次 review 发现，`HEAD` 已有）— `src/application.rs:323-340`
+
+- **上下文**：`port-settings` dialog 打开时通过 `select_port` 保留 `current`
+  端口；`btn_port_refresh` 回调 `src/application.rs:325` 直接
+  `port_row.set_selected(0)`。
+- **错误点**：`src/application.rs:330` 每次刷新后无视 `engine.port_name()` 已选，强制切到第一设备并
+  `open_port`，与打开对话框的保留语义不一致；`HEAD:293` 同样为 `set_selected(0)`。
+- **期望**：刷新后同样
+  `let cur = engine.borrow().port_name()...; select_port(&port_row, &ports, cur)`；若刻意重置则显式注释“refresh
+  意为重置为第一端口”。
+- **为何**：中严重，用户已选端口在刷新后被静默切换，P2，延期。
+
+### C6. `MidiDensityView` 的 `vexpand` 归属混乱（本次 review 发现，部分本次引入）— `src/midi_view.rs:113` / `src/application.rs:150-156` / `ui/window.blp:142,147`
+
+- **上下文**：`MidiDensityView::new:113` 内 `set_vexpand(true)`；本次将 `view_root`
+  占位拆为父容器 `Box page/density_placeholder[vexpand true/false]`
+  `ui/window.blp:142,147` 后，`src/application.rs:150` 改为
+  `placeholder.append(child)`，外层 `placeholder` 的 `vexpand` 已决定是否吃剩余空间。
+- **错误点**：`MidiDensityView` 自身仍 `vexpand true`，实际是否伸展取决于父 `Box` 的
+  `vexpand false` 截断，冗余且易误导后人（`src/application.rs:150` 已删
+  `density_view.set_vexpand(false)` 行）。
+- **期望**：策略归一：让 `placeholder` 拥有 `vexpand` 决策，`MidiDensityView::new` 去掉
+  `set_vexpand(true)` 或在 `application.rs` 显式 `density_view.set_vexpand(false)`
+  并注释“由 placeholder 决定”。
+- **为何**：P3，可读性/布局契约问题，需下次动 `midi_view.rs` 时顺手理清。
 
 ### C3. `GFile.path().unwrap_or_default()` 掩盖真因 — `src/application.rs:206-210,386-390`
 

@@ -129,6 +129,26 @@ Adw.ApplicationWindow window_main {
                 margin-top: 24;
                 margin-bottom: 24;
 
+                Label label_name {
+                  label: "No file loaded";
+                  xalign: 0.0;
+                  ellipsize: end;
+
+                  styles [
+                    "title-1",
+                  ]
+                }
+
+                Box page_view_placeholder {
+                  vexpand: true;
+                  hexpand: true;
+                }
+
+                Box density_view_placeholder {
+                  vexpand: false;
+                  hexpand: true;
+                }
+
                 Adw.Clamp {
                   maximum-size: 480;
                   valign: end;
@@ -136,16 +156,6 @@ Adw.ApplicationWindow window_main {
                   child: Box {
                     orientation: vertical;
                     spacing: 12;
-
-                    Label label_name {
-                      label: "No file loaded";
-                      xalign: 0.5;
-                      wrap: true;
-
-                      styles [
-                        "title-1",
-                      ]
-                    }
 
                     Scale seek_scale {
                       hexpand: true;

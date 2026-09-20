@@ -43,14 +43,18 @@ impl PreludeApplication {
     }
 }
 
-fn select_port(dropdown: &gtk::DropDown, ports: &[String], current: Option<&str>) {
+fn select_port(row: &adw::ComboRow, ports: &[String], current: Option<&str>) {
+    if ports.is_empty() {
+        row.set_selected(gtk::INVALID_LIST_POSITION);
+        return;
+    }
     if let Some(name) = current {
         if let Some(i) = ports.iter().position(|p| p == name) {
-            dropdown.set_selected(i as u32);
+            row.set_selected(i as u32);
+            return;
         }
-    } else {
-        dropdown.set_selected(0);
     }
+    row.set_selected(0);
 }
 
 /// Widgets that `load_file` updates after a successful load.
@@ -81,7 +85,12 @@ fn load_file(engine: &Rc<RefCell<MidiEngine>>, path: &str, ui: FileLoadUi<'_>) -
             let peaks = eng.note_density_data(DENSITY_BINS);
             eng.play();
             drop(eng);
-            ui.label_name.set_text(&name);
+            let display = std::path::Path::new(&name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(name);
+            ui.label_name.set_text(&display);
             ui.density_view.set_peaks(peaks);
             ui.density_view.set_position(0.0);
             ui.page_view.reset();
@@ -138,15 +147,13 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let btn_open_initial = get_object!(builder, "button_open_initial", gtk::Button);
     let btn_stop = get_object!(builder, "button_stop", gtk::Button);
 
-    let view_root = get_object!(builder, "view_root", gtk::Box);
+    let page_placeholder = get_object!(builder, "page_view_placeholder", gtk::Box);
+    let density_placeholder = get_object!(builder, "density_view_placeholder", gtk::Box);
     let density_view = MidiDensityView::new();
-
-    // Dual-view layout, top to bottom: page-turn canvas (eats all extra
-    // space), density strip (natural height, full width), control bar.
     let page_view = PageTurnView::new(engine.clone());
-    view_root.prepend(page_view.widget());
-    density_view.set_vexpand(false);
-    view_root.insert_child_after(density_view.widget(), Some(page_view.widget()));
+    // Placeholders are parents — Blueprint order is the view order, no remove/reorder.
+    page_placeholder.append(page_view.widget());
+    density_placeholder.append(density_view.widget());
 
     // ── Density view position changed → seek ──
     density_view.set_on_position_changed(clone!(
@@ -228,9 +235,22 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         window.add_controller(drop_target);
     }
 
-    // ── Port model / dropdown ──
+    // ── Port settings Blueprint dialog (adaptive: floating on desktop, bottom-sheet on mobile) ──
     let port_model = gtk::StringList::new(&[]);
-    let port_dropdown = gtk::DropDown::new(Some(port_model.clone()), None::<&gtk::Expression>);
+    let port_builder =
+        gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/port_settings.ui")));
+    let port_dialog = get_object!(port_builder, "port_dialog", adw::PreferencesDialog);
+    let port_row = get_object!(port_builder, "port_row", adw::ComboRow);
+    let btn_port_refresh = get_object!(port_builder, "btn_port_refresh", gtk::Button);
+
+    // ComboRow renders StringList's StringObject via the "string" property
+    let port_expr = gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        None::<&gtk::Expression>,
+        "string",
+    );
+    port_row.set_expression(Some(port_expr));
+    port_row.set_model(Some(&port_model));
 
     let populate_ports = clone!(
         #[strong]
@@ -262,61 +282,59 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         #[strong]
         populate_ports,
         #[strong]
-        port_dropdown,
+        port_dialog,
+        #[strong]
+        port_row,
         #[strong]
         window,
         move |_, _| {
-            let dialog = adw::AlertDialog::builder()
-                .title("Port settings")
-                .body("Select MIDI output port:")
-                .build();
-            dialog.add_response("close", "Close");
-            dialog.set_default_response(Some("close"));
-
             let ports = populate_ports();
-            if !ports.is_empty() {
+            {
                 let current = engine.borrow();
-                select_port(&port_dropdown, &ports, current.port_name());
+                select_port(&port_row, &ports, current.port_name());
             }
-
-            let refresh_btn = gtk::Button::builder()
-                .icon_name("view-refresh-symbolic")
-                .tooltip_text("Refresh ports")
-                .build();
-
-            refresh_btn.connect_clicked(clone!(
-                #[strong]
-                populate_ports,
-                #[strong]
-                port_dropdown,
-                move |_| {
-                    let ports = populate_ports();
-                    if !ports.is_empty() {
-                        port_dropdown.set_selected(0);
-                    }
-                },
-            ));
-
-            let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            box_.append(&port_dropdown);
-            box_.append(&refresh_btn);
-            dialog.set_extra_child(Some(&box_));
-            dialog.present(Some(&window));
+            let has_ports = !ports.is_empty();
+            port_row.set_sensitive(has_ports);
+            if has_ports {
+                port_row.set_subtitle("");
+            } else {
+                port_row.set_subtitle("No MIDI ports available");
+            }
+            port_dialog.present(Some(&window));
         },
     ));
     app.add_action(&port_action);
 
-    port_dropdown.connect_selected_notify(clone!(
+    port_row.connect_selected_notify(clone!(
         #[strong]
         engine,
         #[strong]
         port_model,
-        move |dd| {
-            let pos = dd.selected();
-            if pos != u32::MAX {
+        move |row| {
+            let pos = row.selected();
+            if pos != gtk::INVALID_LIST_POSITION {
                 if let Some(name) = port_model.string(pos) {
                     let _ = engine.borrow_mut().open_port(name.as_ref());
                 }
+            }
+        },
+    ));
+
+    btn_port_refresh.connect_clicked(clone!(
+        #[strong]
+        populate_ports,
+        #[strong]
+        port_row,
+        move |_| {
+            let ports = populate_ports();
+            let has_ports = !ports.is_empty();
+            port_row.set_sensitive(has_ports);
+            if has_ports {
+                port_row.set_selected(0);
+                port_row.set_subtitle("");
+            } else {
+                port_row.set_selected(gtk::INVALID_LIST_POSITION);
+                port_row.set_subtitle("No MIDI ports available");
             }
         },
     ));
@@ -544,9 +562,16 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     // ── Refresh ports and select first one ──
     {
         let ports = populate_ports();
-        if !ports.is_empty() {
+        {
             let current = engine.borrow();
-            select_port(&port_dropdown, &ports, current.port_name());
+            select_port(&port_row, &ports, current.port_name());
+        }
+        let has_ports = !ports.is_empty();
+        port_row.set_sensitive(has_ports);
+        if has_ports {
+            port_row.set_subtitle("");
+        } else {
+            port_row.set_subtitle("No MIDI ports available");
         }
     }
 

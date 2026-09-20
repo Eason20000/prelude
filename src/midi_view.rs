@@ -14,7 +14,7 @@ const BAR_SPACING: f64 = BAR_WIDTH + BAR_GAP;
 const PLAYED_ALPHA: f32 = 0.7;
 const UPCOMING_ALPHA: f32 = 0.35;
 const MIN_BAR_HEIGHT: f64 = 1.0;
-const CONTENT_HEIGHT: i32 = 96;
+const CONTENT_HEIGHT: i32 = 48;
 
 type PositionCallback = Box<dyn Fn(f64)>;
 

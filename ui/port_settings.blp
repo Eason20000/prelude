@@ -1,0 +1,35 @@
+using Gtk 4.0;
+using Adw 1;
+
+Adw.PreferencesDialog port_dialog {
+  title: "Port Settings";
+  search-enabled: false;
+  content-width: 360;
+  content-height: 240;
+
+  Adw.PreferencesPage port_page {
+    title: "MIDI";
+    icon-name: "audio-x-generic-symbolic";
+
+    Adw.PreferencesGroup port_group {
+      title: "Output";
+      description: "Select MIDI output port";
+
+      Adw.ComboRow port_row {
+        title: "MIDI Output Port";
+
+        [suffix]
+        Button btn_port_refresh {
+          icon-name: "view-refresh-symbolic";
+          tooltip-text: "Refresh ports";
+          valign: center;
+
+          styles [
+            "flat",
+            "circular",
+          ]
+        }
+      }
+    }
+  }
+}
