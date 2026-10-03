@@ -55,13 +55,13 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          meson setup builddir
+          meson setup --buildtype=release builddir
           meson compile -C builddir
       - name: Meson setup + compile (Unix)
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
-          meson setup builddir
+          meson setup --buildtype=release builddir
           meson compile -C builddir
       - name: Stage files (Windows)
         if: runner.os == 'Windows'
