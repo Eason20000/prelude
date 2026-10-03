@@ -49,7 +49,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-blueprint-compiler
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler
       - name: Meson setup + compile (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -68,12 +68,23 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          mkdir -p stage/schemas
-          cp builddir/src/prelude stage/prelude.exe
-          ldd stage/prelude.exe | grep -o '/ucrt64/bin/[^ ]*\.dll' | sort -u | xargs -I{} cp {} stage/
-          cp data/top.vikasmi.Prelude.gschema.xml stage/schemas/
-          glib-compile-schemas stage/schemas
-          cp builddir/src/prelude.gresource stage/
+          # Prefix layout (bin/lib/share): MSYS2's gdk-pixbuf is built
+          # relocatable, so it resolves its loaders and schemas relative to
+          # the exe instead of the /ucrt64 build machine.
+          mkdir -p stage/bin stage/share/prelude stage/share/glib-2.0/schemas stage/share/icons stage/lib/gdk-pixbuf-2.0
+          cp builddir/src/prelude stage/bin/prelude.exe
+          ldd stage/bin/prelude.exe | grep -o '/ucrt64/bin/[^ ]*\.dll' | sort -u | xargs -I{} cp {} stage/bin/
+          cp builddir/src/prelude.gresource stage/share/prelude/
+          cp data/top.vikasmi.Prelude.gschema.xml stage/share/glib-2.0/schemas/
+          glib-compile-schemas stage/share/glib-2.0/schemas
+          cp -r data/icons/hicolor stage/share/icons/
+          test -d /ucrt64/share/icons/Adwaita || { echo "Adwaita icons not installed"; exit 1; }
+          cp -r /ucrt64/share/icons/Adwaita stage/share/icons/
+          cp -r /ucrt64/lib/gdk-pixbuf-2.0/*/loaders stage/lib/gdk-pixbuf-2.0/
+          cp /ucrt64/lib/gdk-pixbuf-2.0/*/loaders.cache stage/lib/gdk-pixbuf-2.0/
+          ls stage/lib/gdk-pixbuf-2.0/loaders | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
+          grep -q svg stage/lib/gdk-pixbuf-2.0/loaders.cache || { echo "SVG loader missing from cache"; exit 1; }
+          if grep -q '^"/ucrt64' stage/lib/gdk-pixbuf-2.0/loaders.cache; then echo "loaders.cache is not relocatable"; exit 1; fi
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
