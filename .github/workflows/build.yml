@@ -142,9 +142,25 @@ jobs:
           mkdir -p "$APP/Frameworks/gdk-pixbuf/loaders"
           for prefix in "$(brew --prefix gdk-pixbuf)" "$(brew --prefix librsvg)"; do
             cp -L "$prefix"/lib/gdk-pixbuf-2.0/*/loaders/*.so "$APP/Frameworks/gdk-pixbuf/loaders/" 2>/dev/null || true
-            cp -L "$prefix"/lib/gdk-pixbuf-2.0/*/loaders/*.dylib "$APP/Frameworks/gdk-pixbuf/loaders/" 2>/dev/null || true
           done
           ls "$APP/Frameworks/gdk-pixbuf/loaders" | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
+          chmod +w "$APP/Frameworks/gdk-pixbuf/loaders/"*
+          # dylibbundler cannot resolve @rpath references: it asks
+          # interactively, which hangs CI. Rewrite them to absolute brew paths
+          # first — dylibbundler then bundles them like any other dep.
+          for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
+            refs="$(otool -L "$loader" | grep -o '@rpath/[^ ]*' | sort -u || true)"
+            for ref in $refs; do
+              base="${ref##*/}"
+              found=""
+              for d in /opt/homebrew/opt/*/lib /opt/homebrew/lib; do
+                if [ -f "$d/$base" ]; then found="$d/$base"; break; fi
+              done
+              if [ -z "$found" ]; then echo "cannot resolve $ref in $loader"; exit 1; fi
+              echo "rewriting $ref -> $found"
+              install_name_tool -change "$ref" "$found" "$loader"
+            done
+          done
           for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
             # No -od here: the inputs live inside the output dir, and -od
             # would erase them (and everything else) before fixing. -of is
