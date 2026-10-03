@@ -14,7 +14,7 @@ behavior, and rationale. Priority levels reuse the previously reviewed scale
 severity). `file:line` references are based on the `fa0bcce` snapshot and may
 drift by about one line with subsequent edits.
 
-______________________________________________________________________
+---
 
 ## A. Engine — Deferred to State-Machine Rewrite
 
@@ -125,7 +125,7 @@ for subsequent research.
 - **Rationale**: One-time cost at load time; typical files have very few tempo
   segments; P3 with no perceptible impact; deferred to subsequent research.
 
-______________________________________________________________________
+---
 
 ## B. Page View — Rendering and Animation
 
@@ -240,7 +240,7 @@ ______________________________________________________________________
   single-window assumption in the comment.
 - **Rationale**: P3 hygiene item.
 
-______________________________________________________________________
+---
 
 ## C. Application — Wiring and Semantics
 
@@ -338,7 +338,7 @@ ______________________________________________________________________
 - **Rationale**: P3 readability/layout-contract issue; to be tidied the next
   time `midi_view.rs` is touched; deferred to subsequent research.
 
-______________________________________________________________________
+---
 
 ## D. UI / Style / Docs
 
@@ -381,7 +381,7 @@ ______________________________________________________________________
   runtime confirmation.
 - **Rationale**: P3 layout reasoning, not yet confirmed at runtime.
 
-______________________________________________________________________
+---
 
 ## E. By-Design (Not Bugs — Recorded to Prevent Mistaken Fixes)
 
