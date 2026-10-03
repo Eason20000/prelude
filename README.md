@@ -16,5 +16,7 @@ buttons or the space bar.
 
 ```bash
 nix develop
-cargo build
+meson setup builddir --prefix=$HOME/.local
+meson install -C builddir
+~/.local/bin/prelude
 ```
