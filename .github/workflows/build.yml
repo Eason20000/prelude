@@ -1,0 +1,130 @@
+name: build
+# Build check on every push; also reusable via workflow_call (see release.yml).
+# Packages and uploads artifacts in both cases.
+#
+# Windows runs under MSYS2-UCRT64: only MSYS2 ships prebuilt libadwaita,
+# blueprint-compiler and a GNU Rust that links them. Shells are pinned per
+# step with literal values — expressions are rejected in shell positions, so
+# there is no shared matrix-wide default.
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version suffix for artifact names, e.g. -v1.2.0 (empty for plain names)"
+        type: string
+        default: ""
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: windows-x64
+          - os: ubuntu-26.04
+            asset: linux-x64
+          - os: macos-14
+            asset: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Disable autocrlf (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'Windows'
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin desktop-file-utils
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gtk4 libadwaita meson pkgconf blueprint-compiler dylibbundler
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-blueprint-compiler
+      - name: Meson setup + compile (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          meson setup builddir
+          meson compile -C builddir
+      - name: Meson setup + compile (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          meson setup builddir
+          meson compile -C builddir
+      - name: Stage files (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p stage/schemas
+          cp builddir/src/prelude stage/prelude.exe
+          ldd stage/prelude.exe | grep -o '/ucrt64/bin/[^ ]*\.dll' | sort -u | xargs -I{} cp {} stage/
+          cp data/top.vikasmi.Prelude.gschema.xml stage/schemas/
+          glib-compile-schemas stage/schemas
+          cp builddir/src/prelude.gresource stage/
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = "prelude${{ inputs.version }}-windows-x64.zip"
+          Copy-Item README.md, LICENSE stage/
+          Compress-Archive -Path stage/* -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zip" | Out-File "$zip.sha256" -Encoding ascii
+      - name: Package (Linux AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          SUFFIX="${{ inputs.version }}"
+          mkdir -p AppDir/usr/bin AppDir/usr/share/prelude AppDir/usr/share/glib-2.0/schemas
+          cp builddir/src/prelude AppDir/usr/bin/
+          cp data/top.vikasmi.Prelude.desktop AppDir/
+          rsvg-convert -w 256 -h 256 data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o AppDir/top.vikasmi.Prelude.png
+          cp packaging/appimage/AppRun AppDir/
+          cp builddir/src/prelude.gresource AppDir/usr/share/prelude/
+          cp data/top.vikasmi.Prelude.gschema.xml AppDir/usr/share/glib-2.0/schemas/
+          glib-compile-schemas AppDir/usr/share/glib-2.0/schemas
+          chmod +x AppDir/AppRun AppDir/usr/bin/prelude
+          curl --fail --location --output linuxdeploy-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+          mv Prelude-x86_64.AppImage "Prelude$SUFFIX-linux-x64.AppImage"
+          sha256sum "Prelude$SUFFIX-linux-x64.AppImage" > "Prelude$SUFFIX-linux-x64.AppImage.sha256"
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          SUFFIX="${{ inputs.version }}"
+          mkdir -p stage stage/share/prelude stage/share/glib-2.0/schemas
+          cp builddir/src/prelude stage/
+          dylibbundler -od -b -x ./stage/prelude -d ./stage/libs -p @executable_path/libs
+          cp builddir/src/prelude.gresource stage/share/prelude/
+          cp data/top.vikasmi.Prelude.gschema.xml stage/share/glib-2.0/schemas/
+          glib-compile-schemas stage/share/glib-2.0/schemas
+          cp -r data/icons/hicolor stage/share/icons/
+          cp README.md LICENSE stage/
+          tar -czf "prelude$SUFFIX-macos-arm64.tar.gz" -C stage prelude libs share README.md LICENSE
+          shasum -a 256 "prelude$SUFFIX-macos-arm64.tar.gz" > "prelude$SUFFIX-macos-arm64.tar.gz.sha256"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prelude-${{ matrix.asset }}
+          path: |
+            prelude-*
+            Prelude-*
+          if-no-files-found: error
+          retention-days: 7
