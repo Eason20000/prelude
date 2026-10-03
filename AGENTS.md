@@ -173,15 +173,20 @@ parser changes. `README.md` intentionally has no roadmap.
 - **CI builds all three platforms, runs no tests** —
   `.github/workflows/build.yml` (Windows MSYS2-UCRT64 / Ubuntu 26.04 / macOS 14)
   compiles each platform via Meson with `--buildtype=release` and uploads a
-  runnable artifact (Windows zip, Linux AppImage via `linuxdeploy --plugin gtk`,
-  macOS `.app` in a DMG); `release.yml` publishes them on GitHub Release. There
-  is no CI smoke run — artifacts are verified by manual download-and-launch. The
-  Nix gate owns tests and lint. Windows must stay on MSYS2-UCRT64 (MSVC/choco
-  has no libadwaita or blueprint-compiler); Linux pins `ubuntu-26.04` (24.04's
-  libadwaita 1.5 fails the `>=1.8` check); macOS ships unsigned (no signing or
-  notarization — first launch needs right-click → Open).
+  runnable artifact (Windows zip in prefix layout, Linux AppImage via
+  `linuxdeploy --plugin gtk`, macOS `.app` in a DMG); `release.yml` publishes
+  them on GitHub Release. There is no CI smoke run — artifacts are verified by
+  manual download-and-launch. The Nix gate owns tests and lint. Windows must
+  stay on MSYS2-UCRT64 (MSVC/choco has no libadwaita or blueprint-compiler); its
+  zip mirrors an install prefix (`bin/`/`lib/`/`share/`) with the Adwaita theme
+  and the gdk-pixbuf loaders plus cache, which the relocatable MSYS2 libraries
+  resolve relative to the exe. Linux pins `ubuntu-26.04` (24.04's libadwaita 1.5
+  fails the `>=1.8` check); macOS ships unsigned (no signing or notarization —
+  first launch needs right-click → Open), collecting pixbuf loaders from both
+  the gdk-pixbuf and librsvg Homebrew prefixes (the SVG loader lives in
+  librsvg's) into a cache template instantiated at launch.
   `packaging/macos/Info.plist` version keys are static — bump them with
-  `Cargo.toml`. Theme icons on Windows/macOS fall back (no icon theme bundled).
+  `Cargo.toml`. Theme icons ship inside all three artifacts (bundled Adwaita).
 - **App is GPL-3.0-only**; license must be preserved on reuse.
 - Target environment: **Linux** with a running ALSA sequencer or hardware MIDI
   port.
