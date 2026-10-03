@@ -112,7 +112,7 @@ fn load_file(engine: &Rc<RefCell<MidiEngine>>, path: &str, ui: FileLoadUi<'_>) -
 // this code have drifted apart, so panicking is the correct failure mode.
 #[allow(clippy::expect_used)]
 fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
-    let builder = gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/window.ui")));
+    let builder = gtk::Builder::from_resource("/top/vikasmi/Prelude/window.ui");
 
     let window = get_object!(builder, "window_main", adw::ApplicationWindow);
     window.set_application(Some(app));
@@ -237,8 +237,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     // ── Port settings Blueprint dialog (adaptive: floating on desktop, bottom-sheet on mobile) ──
     let port_model = gtk::StringList::new(&[]);
-    let port_builder =
-        gtk::Builder::from_string(include_str!(concat!(env!("OUT_DIR"), "/port_settings.ui")));
+    let port_builder = gtk::Builder::from_resource("/top/vikasmi/Prelude/port_settings.ui");
     let port_dialog = get_object!(port_builder, "port_dialog", adw::PreferencesDialog);
     let port_row = get_object!(port_builder, "port_row", adw::ComboRow);
     let btn_port_refresh = get_object!(port_builder, "btn_port_refresh", gtk::Button);

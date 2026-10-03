@@ -1,27 +1,54 @@
+# Meson is the primary build system (see meson.build); Nix only provides the
+# dependencies and drives `meson setup/compile/install`. The Rust side is
+# still compiled by Cargo, with vendored crates supplied via `cargoDeps`.
 {
   self,
   lib,
+  stdenv,
   rustPlatform,
+  cargo,
+  rustc,
+  clippy,
+  meson,
+  ninja,
   pkg-config,
   wrapGAppsHook4,
   blueprint-compiler,
-  clippy,
+  desktop-file-utils,
+  glib,
   gtk4,
   libadwaita,
   alsa-lib,
 }:
 
-rustPlatform.buildRustPackage rec {
-  pname = (lib.importTOML (src + "/Cargo.toml")).package.name;
-  version = (lib.importTOML (src + "/Cargo.toml")).package.version;
+let
+  cargoToml = lib.importTOML (self + "/Cargo.toml");
+in
+stdenv.mkDerivation {
+  pname = cargoToml.package.name;
+  version = cargoToml.package.version;
 
   src = self;
-  cargoLock.lockFile = src + "/Cargo.lock";
+
+  cargoDeps = rustPlatform.fetchCargoVendor {
+    inherit (cargoToml.package) version;
+    pname = cargoToml.package.name;
+    src = self;
+    hash = "sha256-SM+K8V2lEnSVUu+yJRlMdyyMCJboE78u6OzOZv/4y5c=";
+  };
 
   nativeBuildInputs = [
+    meson
+    ninja
     pkg-config
     wrapGAppsHook4
     blueprint-compiler
+    desktop-file-utils
+    glib
+    gtk4
+    rustPlatform.cargoSetupHook
+    cargo
+    rustc
     clippy
   ];
   buildInputs = [
@@ -32,8 +59,14 @@ rustPlatform.buildRustPackage rec {
 
   doCheck = true;
 
-  postCheck = ''
-    cargo clippy --profile release --offline -- -D warnings
+  # Meson defaults to a plain (debug) build; ship an optimized binary.
+  mesonBuildType = "release";
+
+  checkPhase = ''
+    runHook preCheck
+    cargo test --offline
+    cargo clippy --profile release --offline -- --deny warnings
+    runHook postCheck
   '';
 
   meta = {

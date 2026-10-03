@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Prelude
+Exec=prelude
+Icon=top.vikasmi.Prelude
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=GTK;
+StartupNotify=true
