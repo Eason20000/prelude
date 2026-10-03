@@ -5,6 +5,8 @@
 //! `cargo build` falls back to the defaults below (which match a default
 //! `meson install` with no `--prefix`).
 
+use std::path::PathBuf;
+
 const APP_ID_ENV: Option<&str> = option_env!("APP_ID");
 const PKGDATADIR_ENV: Option<&str> = option_env!("PKGDATADIR");
 
@@ -20,4 +22,31 @@ pub(crate) fn pkgdatadir() -> &'static str {
         Some(dir) => dir,
         None => "/usr/local/share/prelude",
     }
+}
+
+/// Locate `prelude.gresource`, preferring paths relative to the running
+/// executable so portable trees (Linux AppDir, Windows zip, macOS .app)
+/// work without installing to the build-time prefix. Falls back to the
+/// Meson-baked `pkgdatadir()` above (which keeps the previous behavior of
+/// failing loudly when nothing is found).
+pub(crate) fn gresource_path() -> PathBuf {
+    const FILE: &str = "prelude.gresource";
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = std::env::var("PRELUDE_DATADIR") {
+        candidates.push(PathBuf::from(dir).join(FILE));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("../share/prelude").join(FILE));
+            candidates.push(dir.join("../Resources").join(FILE));
+            candidates.push(dir.join(FILE));
+        }
+    }
+    candidates.push(PathBuf::from(pkgdatadir()).join(FILE));
+
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(pkgdatadir()).join(FILE))
 }

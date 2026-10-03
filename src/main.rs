@@ -8,13 +8,18 @@ use adw::prelude::*;
 use gtk::gio;
 
 fn main() -> gtk::glib::ExitCode {
-    // UI templates live in the installed GResource bundle (compiled from
-    // ui/*.blp by Meson); without it no window can be built.
-    let resource_path = format!("{}/prelude.gresource", config::pkgdatadir());
+    // UI templates live in the GResource bundle (compiled from ui/*.blp by
+    // Meson); without it no window can be built. The bundle is located
+    // relative to the executable so portable trees (AppImage, zip, .app)
+    // run without installing to the build-time prefix.
+    let resource_path = config::gresource_path();
     let resources = match gio::Resource::load(&resource_path) {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("prelude: cannot load resources from {resource_path}: {e}");
+            eprintln!(
+                "prelude: cannot load resources from {}: {e}",
+                resource_path.display()
+            );
             return gtk::glib::ExitCode::FAILURE;
         }
     };
