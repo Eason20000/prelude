@@ -1,8 +1,13 @@
 #!/bin/sh
 # Bundle launcher: point data lookups inside Prelude.app, then exec the real
-# binary (which finds prelude.gresource via ../Resources). Pixbuf loaders are
-# intentionally not bundled — theme icons fall back (see AGENTS.md).
+# binary (which finds prelude.gresource via ../Resources).
 BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export XDG_DATA_DIRS="$BUNDLE_DIR/Resources/share:/usr/local/share:/usr/share"
 export GSETTINGS_SCHEMA_DIR="$BUNDLE_DIR/Resources/share/glib-2.0/schemas"
+# Pixbuf loaders live in the bundle but their cache needs absolute paths, so
+# instantiate it at launch (best effort: the .app may be mounted read-only).
+sed "s|@BUNDLE_DIR@|$BUNDLE_DIR|g" "$BUNDLE_DIR/Resources/loaders.cache.in" > "$BUNDLE_DIR/Resources/loaders.cache" 2>/dev/null || true
+if [ -f "$BUNDLE_DIR/Resources/loaders.cache" ]; then
+    export GDK_PIXBUF_MODULE_FILE="$BUNDLE_DIR/Resources/loaders.cache"
+fi
 exec "$BUNDLE_DIR/MacOS/prelude-bin" "$@"

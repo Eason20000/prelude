@@ -41,7 +41,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install gtk4 libadwaita meson pkgconf blueprint-compiler dylibbundler
+        run: brew install gtk4 libadwaita adwaita-icon-theme meson pkgconf blueprint-compiler dylibbundler
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -123,6 +123,22 @@ jobs:
           cp data/top.vikasmi.Prelude.gschema.xml "$APP/Resources/share/glib-2.0/schemas/"
           glib-compile-schemas "$APP/Resources/share/glib-2.0/schemas"
           cp -r data/icons/hicolor "$APP/Resources/share/icons"
+          cp -r "$(brew --prefix adwaita-icon-theme)/share/icons/Adwaita" "$APP/Resources/share/icons/"
+          # The SVG loader lives in librsvg's own prefix, not gdk-pixbuf's —
+          # collect from both, then describe them in a cache template that the
+          # launcher instantiates with bundle-absolute paths at startup
+          # (brew builds gdk-pixbuf with relocatable=false).
+          mkdir -p "$APP/Frameworks/gdk-pixbuf/loaders"
+          for prefix in "$(brew --prefix gdk-pixbuf)" "$(brew --prefix librsvg)"; do
+            cp -L "$prefix"/lib/gdk-pixbuf-2.0/*/loaders/*.so "$APP/Frameworks/gdk-pixbuf/loaders/" 2>/dev/null || true
+            cp -L "$prefix"/lib/gdk-pixbuf-2.0/*/loaders/*.dylib "$APP/Frameworks/gdk-pixbuf/loaders/" 2>/dev/null || true
+          done
+          ls "$APP/Frameworks/gdk-pixbuf/loaders" | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
+          for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
+            dylibbundler -od -b -x "$loader" -d "$APP/Frameworks" -p @executable_path/../Frameworks
+          done
+          APP_ABS="$PWD/stage/Prelude.app/Contents"
+          "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" "$APP_ABS/Frameworks/gdk-pixbuf/loaders/"* | sed "s|$APP_ABS|@BUNDLE_DIR@|g" > "$APP/Resources/loaders.cache.in"
           mkdir -p Prelude.iconset
           for spec in "16:icon_16x16" "32:icon_16x16@2x" "32:icon_32x32" "64:icon_32x32@2x" "128:icon_128x128" "256:icon_128x128@2x" "256:icon_256x256" "512:icon_256x256@2x" "512:icon_512x512" "1024:icon_512x512@2x"; do
             s="${spec%%:*}"; n="${spec##*:}"
