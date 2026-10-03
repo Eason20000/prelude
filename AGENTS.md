@@ -93,7 +93,10 @@ nix build && nix run .
   `gnome.compile_resources` and invokes Cargo with `CARGO_TARGET_DIR` / `APP_ID`
   env, `data/meson.build` installs the desktop file, GSettings schema and icons.
   `src/config.rs` reads `APP_ID` via `option_env!()` with a plain-cargo fallback
-  — never generate it, never `configure_file`+`cp` it.
+  — never generate it, never `configure_file`+`cp` it. `gresource_path()`
+  locates the bundle relative to the executable (`$PRELUDE_DATADIR` override,
+  `../share/prelude`, `../Resources`, exe dir) with the baked `PKGDATADIR` as
+  fallback, so portable trees run without installing to the build prefix.
 
 ## Dependencies (non-obvious)
 
@@ -169,11 +172,16 @@ parser changes. `README.md` intentionally has no roadmap.
   / devShell.
 - **CI builds all three platforms, runs no tests** —
   `.github/workflows/build.yml` (Windows MSYS2-UCRT64 / Ubuntu 26.04 / macOS 14)
-  only checks that each platform compiles via Meson and uploads a smoke
-  artifact; `release.yml` publishes them on GitHub Release. The Nix gate owns
-  tests and lint. Windows must stay on MSYS2-UCRT64 (MSVC/choco has no
-  libadwaita or blueprint-compiler); Linux pins `ubuntu-26.04` (24.04's
-  libadwaita 1.5 fails the `>=1.8` check).
+  compiles each platform via Meson with `--buildtype=release` and uploads a
+  runnable artifact (Windows zip, Linux AppImage via `linuxdeploy --plugin gtk`,
+  macOS `.app` in a DMG); `release.yml` publishes them on GitHub Release. There
+  is no CI smoke run — artifacts are verified by manual download-and-launch. The
+  Nix gate owns tests and lint. Windows must stay on MSYS2-UCRT64 (MSVC/choco
+  has no libadwaita or blueprint-compiler); Linux pins `ubuntu-26.04` (24.04's
+  libadwaita 1.5 fails the `>=1.8` check); macOS ships unsigned (no signing or
+  notarization — first launch needs right-click → Open).
+  `packaging/macos/Info.plist` version keys are static — bump them with
+  `Cargo.toml`. Theme icons on Windows/macOS fall back (no icon theme bundled).
 - **App is GPL-3.0-only**; license must be preserved on reuse.
 - Target environment: **Linux** with a running ALSA sequencer or hardware MIDI
   port.
