@@ -112,16 +112,28 @@ jobs:
         run: |
           set -euo pipefail
           SUFFIX="${{ inputs.version }}"
-          mkdir -p stage stage/share/prelude stage/share/glib-2.0/schemas
-          cp builddir/src/prelude stage/
-          dylibbundler -od -b -x ./stage/prelude -d ./stage/libs -p @executable_path/libs
-          cp builddir/src/prelude.gresource stage/share/prelude/
-          cp data/top.vikasmi.Prelude.gschema.xml stage/share/glib-2.0/schemas/
-          glib-compile-schemas stage/share/glib-2.0/schemas
-          cp -r data/icons/hicolor stage/share/icons/
-          cp README.md LICENSE stage/
-          tar -czf "prelude$SUFFIX-macos-arm64.tar.gz" -C stage prelude libs share README.md LICENSE
-          shasum -a 256 "prelude$SUFFIX-macos-arm64.tar.gz" > "prelude$SUFFIX-macos-arm64.tar.gz.sha256"
+          APP="stage/Prelude.app/Contents"
+          mkdir -p "$APP/MacOS" "$APP/Resources" "$APP/Frameworks" "$APP/Resources/share/glib-2.0/schemas"
+          cp builddir/src/prelude "$APP/MacOS/prelude-bin"
+          cp packaging/macos/Prelude "$APP/MacOS/prelude"
+          chmod +x "$APP/MacOS/prelude"
+          cp packaging/macos/Info.plist "$APP/"
+          dylibbundler -od -b -x "$APP/MacOS/prelude-bin" -d "$APP/Frameworks" -p @executable_path/../Frameworks
+          cp builddir/src/prelude.gresource "$APP/Resources/"
+          cp data/top.vikasmi.Prelude.gschema.xml "$APP/Resources/share/glib-2.0/schemas/"
+          glib-compile-schemas "$APP/Resources/share/glib-2.0/schemas"
+          cp -r data/icons/hicolor "$APP/Resources/share/icons"
+          mkdir -p Prelude.iconset
+          for spec in "16:icon_16x16" "32:icon_16x16@2x" "32:icon_32x32" "64:icon_32x32@2x" "128:icon_128x128" "256:icon_128x128@2x" "256:icon_256x256" "512:icon_256x256@2x" "512:icon_512x512" "1024:icon_512x512@2x"; do
+            s="${spec%%:*}"; n="${spec##*:}"
+            rsvg-convert -w "$s" -h "$s" data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o "Prelude.iconset/${n}.png"
+          done
+          iconutil -c icns Prelude.iconset -o "$APP/Resources/Prelude.icns"
+          mkdir -p dmgstage
+          cp -r stage/Prelude.app dmgstage/
+          ln -s /Applications dmgstage/Applications
+          hdiutil create -volname Prelude -srcfolder dmgstage -ov -format UDZO "Prelude$SUFFIX-macos-arm64.dmg"
+          shasum -a 256 "Prelude$SUFFIX-macos-arm64.dmg" > "Prelude$SUFFIX-macos-arm64.dmg.sha256"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Bundle launcher: point data lookups inside Prelude.app, then exec the real
+# binary (which finds prelude.gresource via ../Resources). Pixbuf loaders are
+# intentionally not bundled — theme icons fall back (see AGENTS.md).
+BUNDLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export XDG_DATA_DIRS="$BUNDLE_DIR/Resources/share:/usr/local/share:/usr/share"
+export GSETTINGS_SCHEMA_DIR="$BUNDLE_DIR/Resources/share/glib-2.0/schemas"
+exec "$BUNDLE_DIR/MacOS/prelude-bin" "$@"
