@@ -146,7 +146,11 @@ jobs:
           done
           ls "$APP/Frameworks/gdk-pixbuf/loaders" | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
           for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
-            dylibbundler -od -b -x "$loader" -d "$APP/Frameworks" -p @executable_path/../Frameworks
+            # No -od here: the inputs live inside the output dir, and -od
+            # would erase them (and everything else) before fixing. -of is
+            # required because deps shared with the main binary are already
+            # bundled (overwritten identically under the same -p prefix).
+            dylibbundler -of -b -x "$loader" -d "$APP/Frameworks" -p @executable_path/../Frameworks
           done
           APP_ABS="$PWD/stage/Prelude.app/Contents"
           "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" "$APP_ABS/Frameworks/gdk-pixbuf/loaders/"* | sed "s|$APP_ABS|@BUNDLE_DIR@|g" > "$APP/Resources/loaders.cache.in"
