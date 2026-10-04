@@ -221,6 +221,41 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
+/// Construct a `SpringAnimation`, compensating for an upstream libadwaita
+/// transfer-annotation bug.
+///
+/// `adw_spring_animation_new` is annotated `(transfer none)` but returns a
+/// freshly created, caller-owned object, so the generated binding uses
+/// `from_glib_none` (which refs again) and leaks one reference per call.
+/// Each leaked animation keeps its target, callback closure and `GWeakRef`
+/// alive forever; on dense files this exhausts the per-object 65535 weak-ref
+/// quota ("Too many GWeakRef registered") and all later notes stop showing.
+/// Dropping the surplus reference here restores the intended ownership. The
+/// branch is self-adapting: if a future libadwaita-rs regenerates with
+/// `from_glib_full` (refcount 1), the extra unref is skipped. Pinned to
+/// `libadwaita =0.9.1` (see Cargo.toml); re-run the constructor leak probe
+/// before bumping the pin.
+fn new_spring_animation(
+    widget: &PageTurnView,
+    from: f64,
+    to: f64,
+    params: adw::SpringParams,
+    target: adw::CallbackAnimationTarget,
+) -> adw::SpringAnimation {
+    let spring = adw::SpringAnimation::new(widget, from, to, params, target);
+    // SAFETY: `as_ptr` is the live animation object; `ref_count` is only read
+    // here, and the conditional unref releases exactly the surplus reference
+    // described above — the wrapper keeps owning one reference either way.
+    unsafe {
+        let raw = spring.as_ptr() as *mut glib::gobject_ffi::GObject;
+        debug_assert_eq!((*raw).ref_count, 2, "upstream leak assumption broken?");
+        if (*raw).ref_count == 2 {
+            glib::gobject_ffi::g_object_unref(raw as *mut _);
+        }
+    }
+    spring
+}
+
 impl PageTurnView {
     pub(crate) fn new(engine: Rc<RefCell<MidiEngine>>) -> Self {
         let view: Self = glib::Object::new();
@@ -238,7 +273,7 @@ impl PageTurnView {
                 view.queue_draw();
             },
         ));
-        let spring = adw::SpringAnimation::new(
+        let spring = new_spring_animation(
             &view,
             0.0,
             1.0,
@@ -483,7 +518,7 @@ impl PageTurnView {
                 view.queue_draw();
             },
         ));
-        let spring = adw::SpringAnimation::new(
+        let spring = new_spring_animation(
             &view,
             0.0,
             1.0,
