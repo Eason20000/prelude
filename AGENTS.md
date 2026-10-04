@@ -18,17 +18,24 @@ nix build && nix run .
 - `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` and
   `ui/port_settings.blp` (both compiled to GtkBuilder XML by Meson into the
   installed `prelude.gresource` bundle, loaded at runtime via
-  `Builder::from_resource`); `load_file` strips any extension via
+  `Builder::from_resource`); `display_stem` strips any extension via
   `Path::file_stem()` for `label_name` only (`engine.file_name` keeps the
-  extension for the info sheet). Runs a `glib::timeout_add_local` tick loop
-  every 20 ms. Scale seeks are **deferred to release** (`was_scale_active`
-  flag): don't seek on every `change-value` while dragging — it spams
-  `all_notes_off`. Port settings are an adaptive `Adw.PreferencesDialog`
-  (`ui/port_settings.blp` → `Adw.ComboRow` + `StringList` injected via
-  `PropertyExpression(StringObject:string)`) presented via
-  `AdwDialogExt::present()`, floating on desktop / bottom-sheet on mobile.
+  extension for the info sheet). File loading is async: `start_load` stops the
+  old song, shows the `loading-view` page (`StatusPage` with a spinner paintable
+  icon + Cancel), parses on a worker thread via `MidiEngine::parse_file`, and
+  applies the result on the main loop (polled over `std::mpsc`,
+  generation-guarded so stale loads/cancels are discarded). Runs a
+  `glib::timeout_add_local` tick loop every 20 ms. Scale seeks are **deferred to
+  release** (`was_scale_active` flag): don't seek on every `change-value` while
+  dragging — it spams `all_notes_off`. Port settings are an adaptive
+  `Adw.PreferencesDialog` (`ui/port_settings.blp` → `Adw.ComboRow` +
+  `StringList` injected via `PropertyExpression(StringObject:string)`) presented
+  via `AdwDialogExt::present()`, floating on desktop / bottom-sheet on mobile.
 - `src/engine.rs` parses MIDI via `midly`, sends events via `midir`; handles
-  play/pause/stop/seek/port management. `play()` re-anchors
+  play/pause/stop/seek/port management. `parse_file` is a pure `Send` function
+  for the background loader thread (cooperative cancellation via `AtomicBool`
+  polling points; `midly::Smf::parse` itself is not interruptible) and
+  `apply_loaded` swaps the result in on the main thread. `play()` re-anchors
   `start = now - elapsed` for both Paused and Stopped (the old pause-duration
   compensation was deliberately removed — don't restore it). SMPTE/timecode
   files are rejected at load with an error. At load it also builds a measure map
@@ -110,24 +117,30 @@ nix build && nix run .
 
 ## Developer commands
 
-| Command                                             | Notes                                                                                                                                                                                                                                                                                         |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nix build`                                         | the **only** test gate — drives Meson (`meson setup`/`compile`/`install`); checkPhase still runs `cargo test` then `cargo clippy --profile release --offline -- -D warnings`. Never verify with bare `cargo ...` outside `nix develop`; `cargo` usage is limited to `cargo generate-lockfile` |
-| `nix flake check`                                   | verifies flake evaluation + formatting                                                                                                                                                                                                                                                        |
-| `nix fmt`                                           | format all tracked sources via treefmt-nix (Nix/Rust/TOML/Markdown/Blueprint/Meson/YAML/XML+SVG/CSS; `*.lock` and LICENSE excluded; yamlfmt folds the MSYS2 package list by design)                                                                                                           |
-| `nix develop`                                       | dev shell with `cargo build` / `cargo clippy` / `cargo generate-lockfile`, plus `meson`/`blueprint-compiler` for setup+install to a prefix; plain `cargo build` still compiles but the binary needs installed resources to open a window                                                      |
-| `meson setup builddir && meson compile -C builddir` | non-Nix builds (MSYS2 MinGW / native Linux): needs `cargo`, `blueprint-compiler`, gtk4 + libadwaita + alsa-lib visible; install with `meson install -C builddir`                                                                                                                              |
+| Command                                             | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nix build`                                         | release/packaging verification only — drives Meson (`meson setup`/`compile`/`install`); checkPhase still runs `cargo test` then `cargo clippy --profile release --offline -- -D warnings`. NOT the daily gate (fresh sandbox every time, no incremental cache, plus remote builder round-trips). Run it after Cargo dependency changes (vendor hash), packaging/flake changes, or before release for CI parity. Never verify with bare `cargo ...` outside `nix develop`; `cargo` usage is limited to `cargo generate-lockfile` |
+| `nix flake check`                                   | verifies flake evaluation + formatting                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `nix fmt`                                           | format all tracked sources via treefmt-nix (Nix/Rust/TOML/Markdown/Blueprint/Meson/YAML/XML+SVG/CSS; `*.lock` and LICENSE excluded; yamlfmt folds the MSYS2 package list by design)                                                                                                                                                                                                                                                                                                                                             |
+| `nix develop`                                       | dev shell with `cargo build` / `cargo clippy` / `cargo generate-lockfile`, plus `meson`/`blueprint-compiler` for setup+install to a prefix; plain `cargo build` still compiles but the binary needs installed resources to open a window                                                                                                                                                                                                                                                                                        |
+| `meson setup builddir && meson compile -C builddir` | non-Nix builds (MSYS2 MinGW / native Linux): needs `cargo`, `blueprint-compiler`, gtk4 + libadwaita + alsa-lib visible; install with `meson install -C builddir`                                                                                                                                                                                                                                                                                                                                                                |
 
 There are no tests — no test directory, no test dependencies. Do not add testing
 infrastructure unless explicitly asked.
 
-Run `nix fmt` before every commit.
+Pre-commit gate: `nix fmt`, then inside `nix develop` run `cargo build` and
+`cargo clippy -- -D warnings` (incremental, seconds after the first build); when
+UI/resources changed, also `meson setup builddir --prefix="$PWD/.prefix"` once,
+then `meson compile -C builddir && meson install -C builddir` per change and run
+`./.prefix/bin/prelude` (`cargo build` alone compiles but the binary needs
+installed resources to open a window).
 
 ## Lint
 
 `unwrap()` and `expect()` are **compile errors**
 (`unwrap_used`/`expect_used = deny` in `Cargo.toml`). All clippy warnings are
-fatal in postCheck (the `nix build` gate).
+fatal — in `nix build` checkPhase and in the pre-commit
+`cargo clippy -- -D warnings` gate alike.
 
 GTK closures use `glib::clone!` with `#[strong]` / `#[weak]` attribute syntax
 (glib 0.22 proc macro). The old `@strong x =>` syntax no longer exists — don't

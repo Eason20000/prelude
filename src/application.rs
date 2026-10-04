@@ -1,5 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use gtk::gdk;
 use gtk::gio;
@@ -10,11 +14,12 @@ use glib::clone;
 
 use adw::prelude::*;
 
-use crate::engine::{MidiEngine, State};
+use crate::engine::{LOAD_CANCELLED, LoadedSong, MidiEngine, State};
 use crate::midi_view::MidiDensityView;
 use crate::page_view::PageTurnView;
 
 const TICK_INTERVAL_MS: u32 = 20;
+const LOAD_POLL_INTERVAL_MS: u64 = 20;
 const SEEK_STEP: f64 = 5.0;
 const DENSITY_BINS: usize = 300;
 
@@ -57,55 +62,19 @@ fn select_port(row: &adw::ComboRow, ports: &[String], current: Option<&str>) {
     row.set_selected(0);
 }
 
-/// Widgets that `load_file` updates after a successful load.
-struct FileLoadUi<'a> {
-    label_name: &'a gtk::Label,
-    main_stack: &'a gtk::Stack,
-    seek_adjustment: &'a gtk::Adjustment,
-    density_view: &'a MidiDensityView,
-    page_view: &'a PageTurnView,
-    error_page: &'a adw::StatusPage,
-}
+/// Completion message from a background parse: the requesting generation plus
+/// its result. Stale generations (a newer load started, or cancel) are
+/// discarded on arrival; the worker thread then simply exits.
+type LoadResult = (u64, Result<LoadedSong, String>);
 
-/// Load a MIDI file into the engine and update the UI; returns whether the load succeeded.
-fn load_file(engine: &Rc<RefCell<MidiEngine>>, path: &str, ui: FileLoadUi<'_>) -> bool {
-    // Non-local GFiles surface as "" via path().unwrap_or_default() at the
-    // call sites; report that directly instead of a generic read error.
-    if path.is_empty() {
-        ui.error_page.set_description(Some(
-            "Could not resolve the dropped/selected file path (non-local file?).",
-        ));
-        ui.main_stack.set_visible_child_name("error-view");
-        return false;
-    }
-    let mut eng = engine.borrow_mut();
-    match eng.load(path) {
-        Ok(name) => {
-            let total = eng.total_length();
-            let peaks = eng.note_density_data(DENSITY_BINS);
-            eng.play();
-            drop(eng);
-            let display = std::path::Path::new(&name)
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .filter(|s| !s.is_empty())
-                .unwrap_or(name);
-            ui.label_name.set_text(&display);
-            ui.density_view.set_peaks(peaks);
-            ui.density_view.set_position(0.0);
-            ui.page_view.reset();
-            ui.seek_adjustment.set_upper(total);
-            ui.seek_adjustment.set_value(0.0);
-            ui.main_stack.set_visible_child_name("main-view");
-            true
-        }
-        Err(e) => {
-            drop(eng);
-            ui.error_page.set_description(Some(&e));
-            ui.main_stack.set_visible_child_name("error-view");
-            false
-        }
-    }
+/// Strip the extension for the title label (`engine.file_name` keeps it for
+/// the info sheet).
+fn display_stem(name: &str) -> String {
+    std::path::Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| name.to_string())
 }
 
 // Builder lookups must succeed — a missing widget means the UI template and
@@ -132,6 +101,9 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let main_content = get_object!(builder, "main_content", adw::ToolbarView);
     let error_page = get_object!(builder, "error_page", adw::StatusPage);
     let button_error_retry = get_object!(builder, "button_error_retry", gtk::Button);
+    let button_loading_cancel = get_object!(builder, "button_loading_cancel", gtk::Button);
+    let loading_status = get_object!(builder, "loading_status", adw::StatusPage);
+    loading_status.set_paintable(Some(&adw::SpinnerPaintable::new(Some(&loading_status))));
     let main_stack = get_object!(builder, "main_stack", gtk::Stack);
     let info_sheet = get_object!(builder, "info_sheet", adw::BottomSheet);
     let label_info = get_object!(builder, "label_info", gtk::Label);
@@ -154,6 +126,175 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     // Placeholders are parents — Blueprint order is the view order, no remove/reorder.
     page_placeholder.append(page_view.widget());
     density_placeholder.append(density_view.widget());
+
+    // ── Async MIDI loading ──
+    // Parsing runs on a worker thread; the main thread only switches the
+    // stack and applies the result, so menus and port settings stay usable
+    // while a huge file parses. `load_gen` discards stale completions and
+    // `load_cancel` asks the running worker to bail out at its polling
+    // points (midly parsing itself is not interruptible). Completion travels
+    // back over a std mpsc channel polled from the main loop, so no GTK
+    // object ever crosses threads.
+    let load_gen = Rc::new(Cell::new(0u64));
+    let load_cancel: Rc<RefCell<Arc<AtomicBool>>> =
+        Rc::new(RefCell::new(Arc::new(AtomicBool::new(false))));
+
+    // Start loading `path` on a worker thread; returns whether the load was
+    // accepted (false only for an unresolvable path). Stops the old song
+    // immediately and supersedes any load still in flight.
+    let start_load = clone!(
+        #[strong]
+        engine,
+        #[strong]
+        label_name,
+        #[strong]
+        main_stack,
+        #[strong]
+        seek_adjustment,
+        #[strong]
+        density_view,
+        #[strong]
+        page_view,
+        #[strong]
+        error_page,
+        #[strong]
+        label_position,
+        #[strong]
+        label_length,
+        #[strong]
+        load_gen,
+        #[strong]
+        load_cancel,
+        move |path: &str| -> bool {
+            // Non-local GFiles surface as "" via path().unwrap_or_default()
+            // at the call sites; report that directly, not as a read error.
+            if path.is_empty() {
+                error_page.set_description(Some(
+                    "Could not resolve the dropped/selected file path (non-local file?).",
+                ));
+                main_stack.set_visible_child_name("error-view");
+                return false;
+            }
+            load_cancel.borrow().store(true, Ordering::Relaxed);
+            let gen = load_gen.get() + 1;
+            load_gen.set(gen);
+            let flag = Arc::new(AtomicBool::new(false));
+            *load_cancel.borrow_mut() = flag.clone();
+
+            engine.borrow_mut().stop();
+            label_position.set_text("0:00");
+            label_length.set_text("0:00");
+            seek_adjustment.set_value(0.0);
+            density_view.set_position(0.0);
+            page_view.reset();
+            main_stack.set_visible_child_name("loading-view");
+
+            let (tx, rx) = std::sync::mpsc::channel::<LoadResult>();
+            let owned = path.to_string();
+            std::thread::spawn(move || {
+                let result = MidiEngine::parse_file(&owned, DENSITY_BINS, &flag);
+                let _ = tx.send((gen, result));
+            });
+
+            // Poll for completion on the main loop: cheap, non-blocking, and
+            // it self-removes once this generation resolves or is superseded.
+            let poll_rx = Rc::new(RefCell::new(rx));
+            glib::timeout_add_local(
+                std::time::Duration::from_millis(LOAD_POLL_INTERVAL_MS),
+                clone!(
+                    #[strong]
+                    engine,
+                    #[strong]
+                    label_name,
+                    #[strong]
+                    main_stack,
+                    #[strong]
+                    seek_adjustment,
+                    #[strong]
+                    density_view,
+                    #[strong]
+                    page_view,
+                    #[strong]
+                    error_page,
+                    #[strong]
+                    label_position,
+                    #[strong]
+                    label_length,
+                    #[strong]
+                    load_gen,
+                    #[strong]
+                    poll_rx,
+                    move || {
+                        if gen != load_gen.get() {
+                            return glib::ControlFlow::Break;
+                        }
+                        match poll_rx.borrow().try_recv() {
+                            Ok((msg_gen, result)) => {
+                                if msg_gen != load_gen.get() {
+                                    return glib::ControlFlow::Break;
+                                }
+                                match result {
+                                    Ok(song) => {
+                                        let total = song.total_length;
+                                        let peaks = song.peaks.clone();
+                                        let name = song.file_name.clone();
+                                        {
+                                            let mut eng = engine.borrow_mut();
+                                            eng.apply_loaded(song);
+                                            eng.play();
+                                        }
+                                        label_name.set_text(&display_stem(&name));
+                                        density_view.set_peaks(peaks);
+                                        density_view.set_position(0.0);
+                                        page_view.reset();
+                                        seek_adjustment.set_upper(total);
+                                        seek_adjustment.set_value(0.0);
+                                        label_position.set_text("0:00");
+                                        label_length.set_text(&format_time(total));
+                                        main_stack.set_visible_child_name("main-view");
+                                    }
+                                    Err(e) => {
+                                        // A cancelled worker arrives with a
+                                        // stale `gen` and is dropped above;
+                                        // reaching this means a real error.
+                                        if e != LOAD_CANCELLED {
+                                            error_page.set_description(Some(&e));
+                                            main_stack.set_visible_child_name("error-view");
+                                        }
+                                    }
+                                }
+                                glib::ControlFlow::Break
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                glib::ControlFlow::Continue
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                error_page
+                                    .set_description(Some("Loader thread failed unexpectedly."));
+                                main_stack.set_visible_child_name("error-view");
+                                glib::ControlFlow::Break
+                            }
+                        }
+                    },
+                ),
+            );
+            true
+        },
+    );
+
+    button_loading_cancel.connect_clicked(clone!(
+        #[strong]
+        main_stack,
+        #[strong]
+        load_gen,
+        #[strong]
+        load_cancel,
+        move |_| {
+            load_cancel.borrow().store(true, Ordering::Relaxed);
+            load_gen.set(load_gen.get() + 1);
+            main_stack.set_visible_child_name("initial-view");
+        },
+    ));
 
     // ── Density view position changed → seek ──
     density_view.set_on_position_changed(clone!(
@@ -192,19 +333,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
         drop_target.connect_drop(clone!(
             #[strong]
-            engine,
-            #[strong]
-            label_name,
-            #[strong]
-            main_stack,
-            #[strong]
-            seek_adjustment,
-            #[strong]
-            density_view,
-            #[strong]
-            page_view,
-            #[strong]
-            error_page,
+            start_load,
             move |_target, value, _x, _y| {
                 let Ok(file_list) = value.get::<gdk::FileList>() else {
                     return false;
@@ -215,18 +344,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    return load_file(
-                        &engine,
-                        &path,
-                        FileLoadUi {
-                            label_name: &label_name,
-                            main_stack: &main_stack,
-                            seek_adjustment: &seek_adjustment,
-                            density_view: &density_view,
-                            page_view: &page_view,
-                            error_page: &error_page,
-                        },
-                    );
+                    return start_load(&path);
                 }
                 false
             },
@@ -363,41 +481,17 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
             #[strong]
             file_dialog,
             #[strong]
-            engine,
-            #[strong]
             window,
             #[strong]
-            label_name,
-            #[strong]
-            main_stack,
-            #[strong]
-            seek_adjustment,
-            #[strong]
-            density_view,
-            #[strong]
-            page_view,
-            #[strong]
-            error_page,
+            start_load,
             move || {
                 glib::MainContext::default().spawn_local(clone!(
                     #[strong]
                     file_dialog,
                     #[strong]
-                    engine,
-                    #[strong]
                     window,
                     #[strong]
-                    label_name,
-                    #[strong]
-                    main_stack,
-                    #[strong]
-                    seek_adjustment,
-                    #[strong]
-                    density_view,
-                    #[strong]
-                    page_view,
-                    #[strong]
-                    error_page,
+                    start_load,
                     async move {
                         if let Ok(file) = file_dialog.open_future(Some(&window)).await {
                             let path = file
@@ -405,18 +499,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            load_file(
-                                &engine,
-                                &path,
-                                FileLoadUi {
-                                    label_name: &label_name,
-                                    main_stack: &main_stack,
-                                    seek_adjustment: &seek_adjustment,
-                                    density_view: &density_view,
-                                    page_view: &page_view,
-                                    error_page: &error_page,
-                                },
-                            );
+                            start_load(&path);
                         }
                     },
                 ));

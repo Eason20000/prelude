@@ -118,6 +118,34 @@ Adw.ApplicationWindow window_main {
             }
 
             StackPage {
+              name: "loading-view";
+
+              child: Adw.Clamp {
+                maximum-size: 450;
+                vexpand: true;
+                valign: fill;
+
+                child: Adw.StatusPage loading_status {
+                  title: "Loading MIDI file";
+
+                  Box {
+                    orientation: vertical;
+                    spacing: 12;
+
+                    Button button_loading_cancel {
+                      label: "Cancel";
+                      halign: center;
+
+                      styles [
+                        "pill",
+                      ]
+                    }
+                  }
+                };
+              };
+            }
+
+            StackPage {
               name: "main-view";
 
               child: Box view_root {

@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use midir::{MidiOutput, MidiOutputConnection};
@@ -43,6 +44,24 @@ pub(crate) struct NoteData {
     pub midi: u8,
     pub channel: u8,
 }
+
+/// A fully parsed song. Built off the GTK main thread by [`MidiEngine::parse_file`]
+/// (all fields are `Send`) and swapped into the engine on completion.
+pub(crate) struct LoadedSong {
+    pub events: Vec<(f64, MidiEvent)>,
+    pub total_length: f64,
+    pub measures: Vec<Measure>,
+    pub notes: Vec<NoteData>,
+    pub peaks: Vec<f64>,
+    pub file_name: String,
+}
+
+/// Sentinel error when a background parse observes cancellation. The caller
+/// treats it as silent: the requesting generation is already stale.
+pub(crate) const LOAD_CANCELLED: &str = "Loading cancelled";
+
+/// How often the long parse loops poll the cancellation flag.
+const CANCEL_POLL_EVERY: usize = 4096;
 
 /// Timing data needed to rebuild the measure map after flattening.
 struct SmfTiming {
@@ -93,36 +112,66 @@ impl MidiEngine {
 
     // ── Public API ──────────────────────────────────────────────
 
-    pub(crate) fn load(&mut self, path: &str) -> Result<String, String> {
-        // Parse everything into locals first: a failed load must not disturb
-        // the currently playing song (no stop(), no partial state).
+    // ── Loading ───────────────────────────────────────────────
+    // `parse_file` is a pure function: it touches no `self`, so a background
+    // thread can run it while the UI thread stays responsive. The caller swaps
+    // the result in via `apply_loaded`. `midly::Smf::parse` itself cannot be
+    // interrupted, so cancellation is cooperative: it is observed before and
+    // after parsing plus at polling points in the long loops below.
+
+    pub(crate) fn parse_file(
+        path: &str,
+        bins: usize,
+        cancel: &AtomicBool,
+    ) -> Result<LoadedSong, String> {
         let data = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(LOAD_CANCELLED.to_string());
+        }
         let smf =
             midly::Smf::parse(&data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
-        let parsed = Self::flatten(&smf)?;
-        let timing = parsed.timing;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(LOAD_CANCELLED.to_string());
+        }
+        let parsed = Self::flatten(&smf, cancel)?;
         let measures = Self::calculate_measure_map(
-            timing.tpq,
-            &timing.tempos,
-            &timing.meters,
+            parsed.timing.tpq,
+            &parsed.timing.tempos,
+            &parsed.timing.meters,
             parsed.total_length,
-        );
-        let notes = Self::note_intervals(&parsed.events, parsed.total_length);
+            cancel,
+        )?;
+        let notes = Self::note_intervals(&parsed.events, parsed.total_length, cancel)?;
+        let peaks = Self::density_from_notes(&notes, parsed.total_length, bins, cancel)?;
         let file_name = std::path::Path::new(path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| path.to_string());
 
-        self.stop();
-        self.measures = measures;
-        self.notes = notes;
+        Ok(LoadedSong {
+            events: parsed.events,
+            total_length: parsed.total_length,
+            measures,
+            notes,
+            peaks,
+            file_name,
+        })
+    }
 
-        self.events = parsed.events;
-        self.total_length = parsed.total_length;
-        self.file_name = file_name;
-
-        Ok(self.file_name.clone())
+    /// Swap a background-parsed song in. Resets the transport to Stopped;
+    /// the caller decides whether to `play()` immediately.
+    pub(crate) fn apply_loaded(&mut self, song: LoadedSong) {
+        self.events = song.events;
+        self.total_length = song.total_length;
+        self.measures = song.measures;
+        self.notes = song.notes;
+        self.file_name = song.file_name;
+        self.next_idx = 0;
+        self.elapsed = 0.0;
+        self.start = None;
+        self.paused_since = None;
+        self.state = State::Stopped;
     }
 
     pub(crate) fn play(&mut self) {
@@ -266,22 +315,30 @@ impl MidiEngine {
         &self.notes
     }
 
-    pub(crate) fn note_density_data(&self, bins: usize) -> Vec<f64> {
-        // Reuse the cached note intervals from load() instead of re-pairing
-        // NoteOn/NoteOff here (the old duplicated pairing logic has drifted
-        // from note_intervals before and must not fork again).
-        if self.notes.is_empty() || self.total_length <= 0.0 || bins == 0 {
-            return vec![0.0; bins];
+    /// Density histogram over the cached note intervals (shares the pairing
+    /// logic with the page view via `note_intervals`; do not fork a second
+    /// pairing implementation here).
+    fn density_from_notes(
+        notes: &[NoteData],
+        total_length: f64,
+        bins: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<f64>, String> {
+        if notes.is_empty() || total_length <= 0.0 || bins == 0 {
+            return Ok(vec![0.0; bins]);
         }
 
-        let bin_width = self.total_length / bins as f64;
+        let bin_width = total_length / bins as f64;
         let mut density = vec![0.0; bins];
 
-        for n in &self.notes {
+        for (i, n) in notes.iter().enumerate() {
+            if i.is_multiple_of(CANCEL_POLL_EVERY) && cancel.load(Ordering::Relaxed) {
+                return Err(LOAD_CANCELLED.to_string());
+            }
             let start_bin = (n.time / bin_width).floor() as isize;
             let end_bin = ((n.time + n.duration) / bin_width).ceil() as isize;
-            for i in start_bin.max(0)..end_bin.min(bins as isize) {
-                density[i as usize] += 1.0;
+            for b in start_bin.max(0)..end_bin.min(bins as isize) {
+                density[b as usize] += 1.0;
             }
         }
 
@@ -292,7 +349,7 @@ impl MidiEngine {
             }
         }
 
-        density
+        Ok(density)
     }
 
     pub(crate) fn list_ports() -> Vec<String> {
@@ -367,7 +424,7 @@ impl MidiEngine {
     /// Flatten the SMF into a sorted event stream plus the timing data needed
     /// to build the measure map: ticks per quarter, tempo changes (tick domain)
     /// and time signature changes (tick domain).
-    fn flatten(smf: &midly::Smf) -> Result<ParsedSmf, String> {
+    fn flatten(smf: &midly::Smf, cancel: &AtomicBool) -> Result<ParsedSmf, String> {
         let tpq = match smf.header.timing {
             Timing::Metrical(t) => t.as_int(),
             Timing::Timecode { .. } => {
@@ -383,9 +440,14 @@ impl MidiEngine {
         let mut meters: Vec<(u64, u8, u8)> = Vec::new();
         let mut raw: Vec<(u64, MidiEvent)> = Vec::new();
 
+        let mut seen: usize = 0;
         for track in &smf.tracks {
             let mut abs_tick: u64 = 0;
             for ev in track {
+                if seen.is_multiple_of(CANCEL_POLL_EVERY) && cancel.load(Ordering::Relaxed) {
+                    return Err(LOAD_CANCELLED.to_string());
+                }
+                seen += 1;
                 abs_tick += ev.delta.as_int() as u64;
                 match &ev.kind {
                     TrackEventKind::Meta(MetaMessage::Tempo(us)) => {
@@ -415,10 +477,13 @@ impl MidiEngine {
         meters.sort_by_key(|&(t, _, _)| t);
 
         // Second pass: convert ticks to seconds, then sort by time
-        let mut events: Vec<(f64, MidiEvent)> = raw
-            .into_iter()
-            .map(|(tick, ev)| (Self::seconds_for_tick(tick, tpq, &tempo_changes), ev))
-            .collect();
+        let mut events: Vec<(f64, MidiEvent)> = Vec::with_capacity(raw.len());
+        for (i, (tick, ev)) in raw.into_iter().enumerate() {
+            if i.is_multiple_of(CANCEL_POLL_EVERY) && cancel.load(Ordering::Relaxed) {
+                return Err(LOAD_CANCELLED.to_string());
+            }
+            events.push((Self::seconds_for_tick(tick, tpq, &tempo_changes), ev));
+        }
 
         events.sort_by(|a, b| a.0.total_cmp(&b.0));
 
@@ -441,7 +506,8 @@ impl MidiEngine {
         tempo_changes: &[(u64, u32)],
         meters: &[(u64, u8, u8)],
         total_length: f64,
-    ) -> Vec<Measure> {
+        cancel: &AtomicBool,
+    ) -> Result<Vec<Measure>, String> {
         let mut sorted_meters: Vec<(u64, u8, u8)> = meters.to_vec();
         sorted_meters.sort_by_key(|&(t, _, _)| t);
         if sorted_meters.is_empty() {
@@ -457,6 +523,9 @@ impl MidiEngine {
         let mut meter_idx = 0usize;
 
         loop {
+            if measures.len().is_multiple_of(CANCEL_POLL_EVERY) && cancel.load(Ordering::Relaxed) {
+                return Err(LOAD_CANCELLED.to_string());
+            }
             while meter_idx + 1 < sorted_meters.len()
                 && current_tick >= sorted_meters[meter_idx + 1].0
             {
@@ -497,16 +566,23 @@ impl MidiEngine {
                 quarter: total_length.max(2.0) / 4.0,
             });
         }
-        measures
+        Ok(measures)
     }
 
     /// Pair NoteOn/NoteOff events into note intervals; dangling NoteOns are
     /// extended to the end of the file.
-    fn note_intervals(events: &[(f64, MidiEvent)], total_length: f64) -> Vec<NoteData> {
+    fn note_intervals(
+        events: &[(f64, MidiEvent)],
+        total_length: f64,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<NoteData>, String> {
         let mut pending: Vec<(u8, u8, f64)> = Vec::new();
         let mut notes = Vec::new();
 
-        for (t, ev) in events {
+        for (i, (t, ev)) in events.iter().enumerate() {
+            if i.is_multiple_of(CANCEL_POLL_EVERY) && cancel.load(Ordering::Relaxed) {
+                return Err(LOAD_CANCELLED.to_string());
+            }
             match ev {
                 MidiEvent::NoteOn {
                     channel,
@@ -541,7 +617,7 @@ impl MidiEngine {
         }
 
         notes.sort_by(|a, b| a.time.total_cmp(&b.time));
-        notes
+        Ok(notes)
     }
 
     fn seconds_for_tick(tick: u64, tpq: u16, tempo_map: &[(u64, u32)]) -> f64 {
