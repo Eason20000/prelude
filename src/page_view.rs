@@ -33,10 +33,7 @@ const CONTENT_HEIGHT: i32 = 200;
 // very long notes would never settle within the page lifetime (huge mass).
 const GROWTH_MASS_MIN_MULT: f64 = 0.25;
 const GROWTH_MASS_MAX_MULT: f64 = 4.0;
-// Resume thundering-herd guard: at most this many growth springs are fired per
-// frame; the rest wait for the following frames (their `started` stays false).
 // Paused seeks intentionally leave passed notes blank until resume.
-const MAX_GROWTH_SPAWNS_PER_TICK: usize = 16;
 // ── Per-track color variation (tune by eye) ──
 // Each MIDI channel gets a deterministic lightness/saturation offset from the
 // accent color; the hue always stays identical to the accent. Crank the two
@@ -390,19 +387,15 @@ impl PageTurnView {
         // Note growth: fire a spring per note when its start time passes.
         // Covers both the current page and the outgoing page, so notes that
         // hadn't started at the page turn still grow (and get wiped) visibly.
-        // Paused seeks intentionally leave passed notes blank until resume;
-        // the per-frame cap spreads the resume burst over several frames.
+        // Paused seeks intentionally leave passed notes blank until resume.
+        // Every due note fires in the same frame: throttling here would leave
+        // notes unstarted when the next page turn drops them.
         if playing {
-            let mut spawned = 0usize;
-            'outer: for cache in [&imp.cached_current, &imp.cached_prev] {
+            for cache in [&imp.cached_current, &imp.cached_prev] {
                 for n in cache.borrow().iter() {
-                    if spawned >= MAX_GROWTH_SPAWNS_PER_TICK {
-                        break 'outer;
-                    }
                     if !n.started.get() && elapsed >= n.time {
                         n.started.set(true);
                         self.spawn_growth_spring(n);
-                        spawned += 1;
                     }
                 }
             }

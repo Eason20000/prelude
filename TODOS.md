@@ -209,15 +209,14 @@ for subsequent research.
 ### B8. Per-Frame Scan and Growth-Spring Cost — `src/page_view.rs:360-500`
 
 - **Context**: `tick` scans both caches each frame to find notes to trigger, and
-  on page turn scans all of `eng.notes()`; already mitigated with
-  `MAX_GROWTH_SPAWNS_PER_TICK=16` throttling, `imp.growth` retention, a
-  16-channel LUT, and early-break.
+  on page turn scans all of `eng.notes()`; already mitigated with `imp.growth`
+  retention, a 16-channel LUT, and early-break.
 - **Location**: Complexity is already acceptable; the remaining cost is multiple
   `queue_draw` callbacks within the same frame.
 - **Expected**: Keep as is; add indexing/batching to rebuild only if needed
   later.
-- **Rationale**: Files with several thousand notes are already smooth; P2 was
-  mitigated by throttling, remaining is P3.
+- **Rationale**: Files with several thousand notes are already smooth; remaining
+  is P3.
 
 ### B9. `CachedNote::clone` Shared/Copy Mix — `src/page_view.rs:111-122,330`
 
@@ -390,9 +389,8 @@ for subsequent research.
   are handled as a seek — intentional, cuts directly.
 - **Growth rate tied to length**: `page_view.rs:34-40,439` mass is clamped
   `0.25-4x` by visible length, preserving monotonicity — intentional, retained.
-- **Seek while paused stays blank until playback**: `page_view.rs:360` gated by
-  `if playing` with 16/frame throttling — intentional, stays blank with priority
-  on convenience.
+- **Seek while paused stays blank until playback**: `page_view.rs` gated by
+  `if playing` — intentional, stays blank with priority on convenience.
 - **EOF stays at end**: `engine.rs:233-238` and `application.rs:634-639`
   intentionally do not `re-stop()`; the label and view remain at total duration
   / last page — intentional.
