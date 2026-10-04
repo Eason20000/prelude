@@ -1,6 +1,6 @@
 [package]
 name = "prelude"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A MIDI file player built with GTK4 and libadwaita"
 license = "GPL-3.0-only"
