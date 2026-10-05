@@ -7,7 +7,21 @@ name: android
 # plain (non-steam-run) NDK wrapper scripts, and artifact packaging.
 on:
   push:
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'ui/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/android.yml'
   pull_request:
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'ui/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/android.yml'
   workflow_call:
     inputs:
       version:
