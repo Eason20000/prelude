@@ -8,20 +8,20 @@ name: android
 on:
   push:
     paths:
-      - 'android/**'
-      - 'src/**'
-      - 'ui/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/android.yml'
+      - "android/**"
+      - "src/**"
+      - "ui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/android.yml"
   pull_request:
     paths:
-      - 'android/**'
-      - 'src/**'
-      - 'ui/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/android.yml'
+      - "android/**"
+      - "src/**"
+      - "ui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/android.yml"
   workflow_call:
     inputs:
       version:
