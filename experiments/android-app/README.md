@@ -69,12 +69,12 @@ CI (`.github/workflows/android.yml`) runs this same script on ubuntu-26.04 with
 identical triggers to the desktop build; `release.yml` ships its artifact
 alongside the desktop ones.
 
-## Known traps (earned the hard way)
+## Constraints
 
 - `generate` rewrites the manifest every run: custom bits must go through
   `apply-android-patches.sh` (idempotent), never hand-edited.
-- Meson cannot see Rust sources: `build-android.sh` touches them so cargo really
-  rechecks (stale `.a` was linked into a fresh APK twice).
+- Meson cannot see Rust sources: `build-android.sh` touches them so cargo always
+  rechecks instead of trusting fingerprints.
 - `src://` metainfo includes need the freedesktop `xmlns` + a `<releases>` entry
   or `generate` dies.
 - The GDK content backend crashes on unattached threads; keep opens on the main
@@ -82,9 +82,8 @@ alongside the desktop ones.
 - Cargo's `.pc` files come straight from the build tree
   (`meson-uninstalled/*.pc`, renamed): never `meson install` for them — install
   rebuilds every target including our cargo staticlib, which needs those very
-  files to link (hard deadlock on fresh machines). The staged copies carry
-  absolute build-tree paths, so `PKG_CONFIG_SYSROOT_DIR` must stay unset or it
-  garbles them.
+  files to link. The staged copies carry absolute build-tree paths, so
+  `PKG_CONFIG_SYSROOT_DIR` must stay unset or it garbles them.
 - The sysroot `PKG_CONFIG_PATH` must not leak into `pixiewood prepare`: Meson
   resolves build-machine tools through pkg-config, and a foreign path fails
   configure. Only the cargo step consumes it.

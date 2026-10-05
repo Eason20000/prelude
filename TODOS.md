@@ -400,27 +400,27 @@ for subsequent research.
 ## F. Android Port — Upstream Reports and Deferred Follow-ups
 
 The Android build (`experiments/android-app`, CI `android.yml`) boots, opens
-MIDI via the system picker, parses, and plays (silently until R2 hardware
-routing is attached). Items below are filed or to be filed upstream, plus
-deferred polish. None blocks the current debug APK.
+MIDI via the system picker, parses, plays, and sounds through external MIDI
+destinations (R2 verified on hardware). Items below are filed or to be filed
+upstream, plus deferred polish.
 
 ### F1. GTK: Content-File Read Crashes on Unattached Threads
 
 - **Context**: `gdk_android_content_file_read` uses the non-attaching
   `gdk_android_get_env()` and dereferences NULL off-thread (`fault addr 0x0`),
   while the per-read path right below it uses the attaching
-  `gdk_android_get_thread_env()` guard. Two tombstones prove both shapes:
-  worker-thread blocking read and GIO pool-thread async read crash at the same
-  `+72` offset; main-thread open + worker-side stream reads work.
+  `gdk_android_get_thread_env()` guard. Repro: worker-thread blocking read and
+  GIO pool-thread async read abort at the same `+72` offset; main-thread open +
+  worker-side stream reads work.
 - **Location**: Upstream `gdk/android/gdkandroidcontentfile.c:1653`
   (`gdk_android_content_file_read`); the safe guard exists at
   `gdkandroidinit.c:796` (`gdk_android_get_thread_env`) but is not used on the
   open path.
-- **Expected**: File a GTK issue with both tombstones; the one-line fix is using
+- **Expected**: File a GTK issue with the tombstones; the one-line fix is using
   the guard (or a NULL check) in `gdk_android_content_file_read`. Our workaround
   (`ParseSource::Stream`, open on main thread) stands regardless.
-- **Rationale**: Genuine upstream bug with device-captured evidence; every
-  GTK-on-Android app reading SAF content hits it.
+- **Rationale**: Genuine upstream bug; every GTK-on-Android app reading SAF
+  content hits it.
 
 ### F2. Pixiewood: No Manifest/Activity Customization Hook
 
