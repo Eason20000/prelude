@@ -13,6 +13,13 @@ nix build && nix run .
 ## Architecture
 
 - Single crate at repo root (no workspace).
+- `android/` is the Android platform shell (same Rust core as staticlib + C
+  entry + Pixiewood packaging, see its README): single repo because core and
+  shell share one language and one release train — don't split into a second
+  repo. Desktop changes must not break it: `android/build-android.sh` asserts
+  `Cargo.toml` vs metainfo version sync, and CI `android.yml` runs on
+  `android/**`, `src/**`, `ui/**`, `Cargo.*` changes (release builds all
+  platforms via `workflow_call`).
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`,
   runs `application::PreludeApplication`.
 - `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` and
