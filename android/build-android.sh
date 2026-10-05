@@ -133,8 +133,8 @@ if [ -n "${PRELUDE_RELEASE:-}" ]; then
         echo "build-android: expected $UNSIGNED missing" >&2
         exit 1
     }
-    "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass:android --key-pass:android \
-        --out "$SIGNED" "$UNSIGNED"
+    "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
+        --ks-key-alias androiddebugkey --out "$SIGNED" "$UNSIGNED"
     "$APKSIGNER" verify "$SIGNED"
 fi
 

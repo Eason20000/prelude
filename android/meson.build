@@ -1,5 +1,5 @@
-# Android packaging of Prelude itself (experiment, not part of the desktop
-# build). Pixiewood drives this project per-arch (bin-aarch64, bin-x86_64):
+# Android platform shell for Prelude (not part of the desktop
+# build). Pixiewood drives this project per-arch (bin-aarch64):
 #   pixiewood prepare -s $ANDROID_HOME -t $ANDROID_NDK_HOME pixiewood.xml
 #   pixiewood generate && pixiewood build
 # Cargo (with the Android cross env from android-env.sh) builds the Rust core
@@ -22,7 +22,9 @@ glib_compile_resources = find_program('glib-compile-resources')
 cargo_prog = find_program('cargo')
 py3 = find_program('python3')
 
-repo_root = meson.project_source_root() / '..' / '..'
+# android/ sits at the repo root, so one level up is the repo itself.
+# Keep this in sync with the directory layout (it used to be two).
+repo_root = meson.project_source_root() / '..'
 
 # 1. Blueprint ui/*.blp -> build-root/*.ui (host tools, same as desktop).
 window_ui = custom_target(
