@@ -5,7 +5,7 @@
 #
 # Debug APK by default (desktop convention); PRELUDE_RELEASE=1 selects
 # release (fresh-configured runtime, cargo --release, Gradle assembleRelease,
-# debug-keystore signing). Everything Android-specific lives in experiments/;
+# debug-keystore signing). Everything Android-specific lives in android/;
 # the repo root build is untouched.
 #
 # Prerequisites: source ./env.sh first (plus the toolchain shell, see
@@ -48,7 +48,7 @@ have_rev=$(git -C "$PIXIEWOOD_DIR" rev-parse HEAD)
 }
 
 # --- version sync: Cargo.toml vs metainfo ----------------------------------
-cargo_ver=$(grep -oP '^version = "\K[^"]+' ../../Cargo.toml)
+cargo_ver=$(grep -oP '^version = "\K[^"]+' ../Cargo.toml)
 meta_ver=$(grep -oP -m1 '<release version="\K[^"]+' data/top.vikasmi.Prelude.metainfo.xml)
 [ "$cargo_ver" = "$meta_ver" ] || {
     echo "build-android: version drift: Cargo.toml $cargo_ver vs metainfo $meta_ver" >&2
@@ -59,8 +59,8 @@ meta_ver=$(grep -oP -m1 '<release version="\K[^"]+' data/top.vikasmi.Prelude.met
 # Meson cannot see Rust sources as custom_target inputs, and cargo has
 # missed mtime-only changes before (stale .a linked into a fresh APK).
 # Touching is cheap (incremental rebuild) and forces a real recheck.
-touch ../../src/lib.rs ../../src/engine.rs ../../src/application.rs \
-    ../../src/main.rs ../../src/config.rs
+touch ../src/lib.rs ../src/engine.rs ../src/application.rs \
+    ../src/main.rs ../src/config.rs
 
 # --- prepare (first run, forced, or release) ----------------------------------
 # The staged pkg-config path must NOT leak into configure: Meson resolves

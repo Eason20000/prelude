@@ -4,12 +4,12 @@ builddir/
 .prefix/
 *.AppImage
 AppDir/
-# Android spike (experiments/ only; never at the repo root, where Meson
-# would pick them up): Pixiewood-generated Gradle project, Meson wrap
-# checkouts it rewrites, and build outputs.
-experiments/*/.pixiewood/
-experiments/*/subprojects/
-experiments/*/build*/
-experiments/*/.buildconfig
+# Android platform shell (android/ only; never the generated dirs at the
+# repo root, where Meson would pick them up): Pixiewood-generated Gradle
+# project, Meson wrap checkouts it rewrites, and build outputs.
+android/.pixiewood/
+android/subprojects/
+android/build*/
+android/.buildconfig
 *.apk
 *.aab

@@ -11,7 +11,7 @@
 #   3. declare the MIDI feature (not required: devices without MIDI still
 #      install; the app degrades to "no ports")
 #
-# Usage: ./apply-android-patches.sh   (run inside experiments/android-app)
+# Usage: ./apply-android-patches.sh   (run inside android/)
 set -euo pipefail
 
 GEN=".pixiewood/android"

@@ -399,7 +399,7 @@ for subsequent research.
 
 ## F. Android Port — Upstream Reports and Deferred Follow-ups
 
-The Android build (`experiments/android-app`, CI `android.yml`) boots, opens
+The Android build (`android/`, CI `android.yml`) boots, opens
 MIDI via the system picker, parses, plays, and sounds through external MIDI
 destinations (R2 verified on hardware). Items below are filed or to be filed
 upstream, plus deferred polish.
@@ -428,7 +428,7 @@ upstream, plus deferred polish.
   the rest of the manifest are hardcoded in `generate/manifest.xsl`, and there
   is no way to add permissions, features, services or a custom activity
   subclass. We work around it with a post-generate patch script
-  (`experiments/android-app/apply-android-patches.sh`), which must be re-run
+  (`android/apply-android-patches.sh`), which must be re-run
   after every `generate` and asserts its own patterns.
 - **Location**: Upstream `generate/manifest.xsl`, `pixiewood.xsd` (no
   permission/service/activity elements; cf. open upstream issue #24 asking for

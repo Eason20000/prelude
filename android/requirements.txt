@@ -1,5 +1,5 @@
 # Pinned Python build tools for the Android CI job (and local venv setup).
-# Keep in sync with experiments/android-app/pixiewood.lock (meson entry).
+# Keep in sync with android/pixiewood.lock (meson entry).
 # ninja floats: the pip `ninja` wheel tracks upstream closely and a hard pin
 # risks uninstallable versions.
 meson==1.12.1

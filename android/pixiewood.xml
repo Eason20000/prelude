@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Pixiewood manifest packaging Prelude itself for Android.
      SPDX-License-Identifier: GPL-3.0-only
-     Run inside experiments/android-app (Pixiewood rewrites subprojects/
+     Run inside android/ (Pixiewood rewrites subprojects/
      there, never at the repo root). See android-env.sh for the toolchain;
      then: prepare, generate, build. -->
 <app xmlns="https://sp1rit.arpa/pixiewood/" xmlns:xi="http://www.w3.org/2001/XInclude">

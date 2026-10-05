@@ -1,6 +1,6 @@
-# Prelude for Android (experiment)
+# Prelude for Android
 
-Debug-only Android packaging of Prelude via
+Android platform shell for Prelude: same Rust core as desktop, packaged via
 [Pixiewood](https://github.com/sp1ritCS/gtk-android-builder) (pinned revision in
 `pixiewood.lock`). The desktop build in the repo root is untouched; everything
 Android-specific lives in this directory.
@@ -46,7 +46,7 @@ nix shell --impure nixpkgs#steam-run nixpkgs#perl \
 ## Build
 
 ```bash
-cd experiments/android-app
+cd android
 source ./env.sh
 ./build-android.sh            # generate → patch → build → verify (debug APK)
 adb install -r .pixiewood/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
