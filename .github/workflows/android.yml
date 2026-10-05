@@ -18,7 +18,7 @@ jobs:
   android:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Pinned revision comes from android/pixiewood.lock;
       # build-android.sh refuses to run on drift.
       - name: Clone Pixiewood at locked revision
@@ -27,11 +27,11 @@ jobs:
           rev=$(grep -oP '^pixiewood\s*=\s*"\K[0-9a-f]+' android/pixiewood.lock)
           git clone https://github.com/sp1ritCS/gtk-android-builder.git pixiewood
           git -C pixiewood checkout "$rev"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
           cache: "pip"
@@ -92,7 +92,7 @@ jobs:
           cp "$SRC" "prelude$SUFFIX-android-arm64.apk"
           sha256sum "prelude$SUFFIX-android-arm64.apk" > "prelude$SUFFIX-android-arm64.apk.sha256"
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prelude-android
           path: |
