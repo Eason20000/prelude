@@ -3,5 +3,18 @@
   <gresource prefix="/top/vikasmi/Prelude">
     <file preprocess="xml-stripblanks">window.ui</file>
     <file preprocess="xml-stripblanks">port_settings.ui</file>
+    <!-- App-bundled symbolic icons (Adwaita, CC-BY-SA-3.0; see
+         ui/icons/README.md). Used on Android only (registered via
+         IconTheme::add_resource_path under cfg(target_os)); desktop keeps
+         resolving them from the system icon theme. -->
+    <file preprocess="xml-stripblanks">icons/scalable/actions/document-open-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/open-menu-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/media-playback-start-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/media-playback-stop-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/view-refresh-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/mimetypes/audio-x-generic-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/places/folder-music-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/status/dialog-warning-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/status/dialog-information-symbolic.svg</file>
   </gresource>
 </gresources>

@@ -394,3 +394,71 @@ for subsequent research.
 - **EOF stays at end**: `engine.rs:233-238` and `application.rs:634-639`
   intentionally do not `re-stop()`; the label and view remain at total duration
   / last page — intentional.
+
+---
+
+## F. Android Port — Upstream Reports and Deferred Follow-ups
+
+The Android build (`experiments/android-app`, CI `android.yml`) boots, opens
+MIDI via the system picker, parses, and plays (silently until R2 hardware
+routing is attached). Items below are filed or to be filed upstream, plus
+deferred polish. None blocks the current debug APK.
+
+### F1. GTK: Content-File Read Crashes on Unattached Threads
+
+- **Context**: `gdk_android_content_file_read` uses the non-attaching
+  `gdk_android_get_env()` and dereferences NULL off-thread (`fault addr 0x0`),
+  while the per-read path right below it uses the attaching
+  `gdk_android_get_thread_env()` guard. Two tombstones prove both shapes:
+  worker-thread blocking read and GIO pool-thread async read crash at the same
+  `+72` offset; main-thread open + worker-side stream reads work.
+- **Location**: Upstream `gdk/android/gdkandroidcontentfile.c:1653`
+  (`gdk_android_content_file_read`); the safe guard exists at
+  `gdkandroidinit.c:796` (`gdk_android_get_thread_env`) but is not used on the
+  open path.
+- **Expected**: File a GTK issue with both tombstones; the one-line fix is using
+  the guard (or a NULL check) in `gdk_android_content_file_read`. Our workaround
+  (`ParseSource::Stream`, open on main thread) stands regardless.
+- **Rationale**: Genuine upstream bug with device-captured evidence; every
+  GTK-on-Android app reading SAF content hits it.
+
+### F2. Pixiewood: No Manifest/Activity Customization Hook
+
+- **Context**: The launcher activity (`org.gtk.android.ToplevelActivity`) and
+  the rest of the manifest are hardcoded in `generate/manifest.xsl`, and there
+  is no way to add permissions, features, services or a custom activity
+  subclass. We work around it with a post-generate patch script
+  (`experiments/android-app/apply-android-patches.sh`), which must be re-run
+  after every `generate` and asserts its own patterns.
+- **Location**: Upstream `generate/manifest.xsl`, `pixiewood.xsd` (no
+  permission/service/activity elements; cf. open upstream issue #24 asking for
+  custom manifest support).
+- **Expected**: File a feature request for an activity override (or manifest
+  merge hook); link our patch script as the concrete use case (MIDI bootstrap
+  subclass + `android.software.midi` feature). Until then, keep the script and
+  the `pixiewood.lock` revision pin.
+- **Rationale**: Every non-trivial app will need manifest extras; doing it
+  upstream removes a whole class of silent-drift failures.
+
+### F3. midir/ndk-context: Panic Instead of Err Without Init
+
+- **Context**: `ndk-context::android_context()` aborts when uninitialized, so
+  `midir`'s Android backend can never return its documented `InitError` in that
+  state; we contain it with `catch_unwind` in `list_ports` / `open_port`
+  (`src/engine.rs:378-406`).
+- **Location**: Upstream `ndk-context 0.1` (`expect` at `lib.rs:72`) as surfaced
+  through `midir 0.11` (`src/backend/android/mod.rs`).
+- **Expected**: Propose upstream either a fallible accessor or documenting the
+  panic contract; keep our guard regardless (it also covers future init
+  regressions).
+- **Rationale**: A library aborting across what looks like a `Result` API is a
+  trap for every consumer, not just this app.
+
+### F4. Deferred Android Polish (Not Filed Anywhere Yet)
+
+- **BLE runtime permissions** (`BLUETOOTH_CONNECT`/`SCAN`) for wireless MIDI;
+  USB needs none via the MIDI service.
+- **Release build**: Gradle release type, signing key management, APK size
+  (debug is ~400MB unstripped), `@Keep`/ProGuard rules for the JNI bridge.
+- **Lifecycle**: pause/resume/rotation and background behavior are unexercised
+  on device; the 20ms tick loop has no mobile power policy.

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<component xmlns="https://specifications.freedesktop.org/metainfo/1.0" type="desktop-application">
+  <id>top.vikasmi.PreludeSmoke</id>
+  <name>Prelude Smoke</name>
+  <summary>Android toolchain smoke test for Prelude</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>Minimal GTK4/libadwaita application used only to verify the Android
+    build pipeline. Not shipped anywhere.</p>
+  </description>
+  <launchable type="desktop-id">top.vikasmi.PreludeSmoke.desktop</launchable>
+  <releases>
+    <release version="0.1.0" date="2026-10-05"/>
+  </releases>
+</component>

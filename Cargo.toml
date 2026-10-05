@@ -6,12 +6,32 @@ description = "A MIDI file player built with GTK4 and libadwaita"
 license = "GPL-3.0-only"
 authors = ["Eason20000 <eason05wyc@outlook.com>"]
 
+[lib]
+name = "prelude"
+path = "src/lib.rs"
+# The staticlib artifact is for the Android build only, where Meson performs
+# the final link of a C `main` against it (`android_exe_type: 'application'`).
+# Desktop keeps linking the rlib into the binary; listing both crate types
+# keeps one manifest for both without any cfg hacks.
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "prelude"
+path = "src/main.rs"
+
 [dependencies]
 gtk = { package = "gtk4", version = "=0.11.3", features = ["v4_14"] }
 adw = { package = "libadwaita", version = "=0.9.1", features = ["v1_8"] }
 graphene = { package = "graphene-rs", version = "0.22" }
 midly = "0.5"
 midir = "0.11"
+
+# Android-only: initialize ndk-context from PreludeActivity (see
+# prelude_android_init_midi in src/lib.rs). Pinned to the same 0.1 line
+# midir uses so Cargo unifies both on one global instance (verify with
+# `cargo tree -i ndk-context` — two instances would silently break this).
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-context = "0.1"
 
 [lints.clippy]
 unwrap_used = "deny"

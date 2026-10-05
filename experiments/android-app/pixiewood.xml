@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pixiewood manifest packaging Prelude itself for Android.
+     SPDX-License-Identifier: GPL-3.0-only
+     Run inside experiments/android-app (Pixiewood rewrites subprojects/
+     there, never at the repo root). See android-env.sh for the toolchain;
+     then: prepare, generate, build. -->
+<app xmlns="https://sp1rit.arpa/pixiewood/" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <metainfo vercalc="sem121010">
+    <xi:include href="src://data/top.vikasmi.Prelude.metainfo.xml" parse="xml"/>
+  </metainfo>
+  <style>
+    <theme name="adw"/>
+    <icon type="generate">
+      <drawable target="foreground" type="avd" path="src://data/ic_launcher_foreground.xml"/>
+      <color target="background">#1c71d8</color>
+    </icon>
+  </style>
+  <dependencies>
+    <glib>
+      <patch>hack</patch>
+    </glib>
+    <fontconfig/>
+    <gtk/>
+    <libadwaita/>
+  </dependencies>
+  <build target="prelude">
+    <architectures>
+      <!-- arm64 only: real devices. x86_64 (emulator) was dropped — its
+           cargo link never had a matching sysroot, and the emulator flow
+           is gone. One line to bring back. -->
+      <arch>aarch64</arch>
+    </architectures>
+  </build>
+</app>

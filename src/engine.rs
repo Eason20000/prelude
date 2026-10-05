@@ -128,8 +128,36 @@ impl MidiEngine {
         if cancel.load(Ordering::Relaxed) {
             return Err(LOAD_CANCELLED.to_string());
         }
-        let smf =
-            midly::Smf::parse(&data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
+        let file_name = std::path::Path::new(path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| path.to_string());
+        Self::parse_data(&data, file_name, bins, cancel)
+    }
+
+    /// Parse already-loaded bytes. Content-addressed files (Android
+    /// `content://` URIs) have no filesystem path; their bytes arrive via
+    /// GFile streams and the display name stands in for `file_name`.
+    pub(crate) fn parse_bytes(
+        data: &[u8],
+        file_name: String,
+        bins: usize,
+        cancel: &AtomicBool,
+    ) -> Result<LoadedSong, String> {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(LOAD_CANCELLED.to_string());
+        }
+        Self::parse_data(data, file_name, bins, cancel)
+    }
+
+    fn parse_data(
+        data: &[u8],
+        file_name: String,
+        bins: usize,
+        cancel: &AtomicBool,
+    ) -> Result<LoadedSong, String> {
+        let smf = midly::Smf::parse(data).map_err(|e| format!("Failed to parse MIDI file: {e}"))?;
         if cancel.load(Ordering::Relaxed) {
             return Err(LOAD_CANCELLED.to_string());
         }
@@ -143,11 +171,6 @@ impl MidiEngine {
         )?;
         let notes = Self::note_intervals(&parsed.events, parsed.total_length, cancel)?;
         let peaks = Self::density_from_notes(&notes, parsed.total_length, bins, cancel)?;
-        let file_name = std::path::Path::new(path)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| path.to_string());
 
         Ok(LoadedSong {
             events: parsed.events,
@@ -353,21 +376,35 @@ impl MidiEngine {
     }
 
     pub(crate) fn list_ports() -> Vec<String> {
-        match MidiOutput::new(MIDI_CLIENT_NAME) {
-            Ok(midi) => midi
-                .ports()
-                .iter()
-                .filter_map(|p| midi.port_name(p).ok())
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+        // On Android midir aborts instead of returning Err when no Android
+        // context was handed to it (ndk-context panics; normally provided by
+        // PreludeActivity at startup). Catch that here so a missing context
+        // degrades to "no ports" instead of killing the process. Desktop
+        // never panics in this path, so its behavior is unchanged.
+        std::panic::catch_unwind(|| {
+            MidiOutput::new(MIDI_CLIENT_NAME)
+                .map(|midi| {
+                    midi.ports()
+                        .iter()
+                        .filter_map(|p| midi.port_name(p).ok())
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
     pub(crate) fn open_port(&mut self, name: &str) -> Result<(), String> {
         self.port = None;
 
-        let midi = MidiOutput::new(MIDI_CLIENT_NAME)
-            .map_err(|e| format!("Failed to create MIDI output: {e}"))?;
+        let midi = match std::panic::catch_unwind(|| MidiOutput::new(MIDI_CLIENT_NAME)) {
+            Ok(Ok(midi)) => midi,
+            Ok(Err(e)) => return Err(format!("Failed to create MIDI output: {e}")),
+            // Same Android-context panic as in `list_ports`; surface it as a
+            // regular error. If construction succeeded the context exists, so
+            // the calls below cannot hit that panic.
+            Err(_) => return Err("MIDI output is unavailable on this device".to_string()),
+        };
 
         let ports = midi.ports();
         let port = ports

@@ -848,6 +848,7 @@ dependencies = [
  "libadwaita",
  "midir",
  "midly",
+ "ndk-context",
 ]
 
 [[package]]

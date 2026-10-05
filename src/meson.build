@@ -1,12 +1,17 @@
 gnome = import('gnome')
 
 # Bundle the Meson-compiled .ui files (generated into the build root, hence the
-# explicit source_dir) into an installed .gresource bundle.
+# explicit source_dir) into an installed .gresource bundle. ui/icons holds
+# app-bundled symbolic icons (used on Android only).
 resources = gnome.compile_resources(
     'prelude',
     'prelude.gresource.xml',
     dependencies: blueprints,
-    source_dir: [meson.current_source_dir(), meson.project_build_root()],
+    source_dir: [
+        meson.current_source_dir(),
+        meson.project_build_root(),
+        meson.project_source_root() / 'ui',
+    ],
     gresource_bundle: true,
     install: true,
     install_dir: pkgdatadir,

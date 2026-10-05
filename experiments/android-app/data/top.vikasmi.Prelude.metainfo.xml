@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<component xmlns="https://specifications.freedesktop.org/metainfo/1.0" type="desktop-application">
+  <id>top.vikasmi.Prelude</id>
+  <name>Prelude</name>
+  <summary>A MIDI file player built with GTK4 and libadwaita</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>Open a MIDI file and control playback. Experimental Android build.</p>
+  </description>
+  <launchable type="desktop-id">top.vikasmi.Prelude.desktop</launchable>
+  <releases>
+    <release version="0.1.2" date="2026-10-05"/>
+  </releases>
+</component>

@@ -67,6 +67,107 @@ fn select_port(row: &adw::ComboRow, ports: &[String], current: Option<&str>) {
 /// discarded on arrival; the worker thread then simply exits.
 type LoadResult = (u64, Result<LoadedSong, String>);
 
+/// What the loader thread consumes. Files with a filesystem path take the
+/// fast path; content-addressed files (Android `content://` URIs, whose
+/// `GFile::path()` is `None`) travel as a GFile handle plus display name —
+/// the worker reads them through GIO streams instead.
+#[derive(Clone)]
+enum LoadInput {
+    Path(String),
+    Remote { file: gio::File, name: String },
+}
+
+/// Prefer a filesystem path (keeps desktop behavior byte-identical);
+/// fall back to the GFile handle for non-local files.
+fn load_input_from_file(file: &gio::File) -> LoadInput {
+    // Android: scoped storage makes raw paths unreadable (ENOENT) even when
+    // the picker hands back a file:// URI, and content:// URIs have no path
+    // at all. Always go through the ContentResolver stream there; the URI
+    // permission grant travels with the GFile handle.
+    #[cfg(target_os = "android")]
+    {
+        let name = display_name_of(file);
+        return LoadInput::Remote {
+            file: file.clone(),
+            name,
+        };
+    }
+    #[cfg(not(target_os = "android"))]
+    if let Some(path) = file.path() {
+        LoadInput::Path(path.to_string_lossy().to_string())
+    } else {
+        LoadInput::Remote {
+            file: file.clone(),
+            name: display_name_of(file),
+        }
+    }
+}
+
+fn display_name_of(file: &gio::File) -> String {
+    file.query_info(
+        "standard::display-name",
+        gio::FileQueryInfoFlags::NONE,
+        gio::Cancellable::NONE,
+    )
+    .ok()
+    .map(|info| info.display_name().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| "midi file".to_string())
+}
+
+/// What the parse worker consumes: plain bytes plus their display name.
+/// Paths are passed through; remote content arrives as an already-opened
+/// stream (opened on the main thread — see `start_load`).
+enum ParseSource {
+    Path(String),
+    Stream { stream: SendStream, name: String },
+}
+
+/// `gio::FileInputStream` is not `Send` at the type level, but this
+/// particular backend is thread-safe by construction: the Java stream object
+/// is held by global ref (`gdk_android_java_file_input_stream_wrap`), and
+/// every read acquires a thread-guarded JNI env (attaching on demand) and
+/// drops the guard afterwards — including finalize. Reads never touch thread
+/// coordinate state, so moving the handle into the parse worker is sound.
+//
+// SAFETY: see above; the handle is used from exactly one thread at a time.
+struct SendStream(gio::FileInputStream);
+
+unsafe impl Send for SendStream {}
+
+/// Chunk size for worker-side stream reads; each chunk is also a
+/// cancellation polling point, so huge files stay responsive to cancel.
+const READ_CHUNK_SIZE: usize = 1024 * 1024;
+
+fn spawn_parse_worker(
+    source: ParseSource,
+    generation: u64,
+    flag: Arc<AtomicBool>,
+    tx: std::sync::mpsc::Sender<LoadResult>,
+) {
+    std::thread::spawn(move || {
+        let result = match source {
+            ParseSource::Path(path) => MidiEngine::parse_file(&path, DENSITY_BINS, &flag),
+            ParseSource::Stream { stream, name } => {
+                let stream = stream.0;
+                let mut bytes = Vec::new();
+                let mut chunk = vec![0u8; READ_CHUNK_SIZE];
+                loop {
+                    if flag.load(Ordering::Relaxed) {
+                        break Err(LOAD_CANCELLED.to_string());
+                    }
+                    match stream.read(&mut chunk, gio::Cancellable::NONE) {
+                        Ok(0) => break MidiEngine::parse_bytes(&bytes, name, DENSITY_BINS, &flag),
+                        Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+                        Err(e) => break Err(format!("Failed to read file: {e}")),
+                    }
+                }
+            }
+        };
+        let _ = tx.send((generation, result));
+    });
+}
+
 /// Strip the extension for the title label (`engine.file_name` keeps it for
 /// the info sheet).
 fn display_stem(name: &str) -> String {
@@ -96,6 +197,12 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+
+    // Android ships no system icon theme; the APK carries app-bundled Adwaita
+    // symbolic icons (ui/icons → GResource). Desktop resolves from the
+    // system theme and never registers this path, so nothing is shadowed.
+    #[cfg(target_os = "android")]
+    gtk::IconTheme::for_display(&display).add_resource_path("/top/vikasmi/Prelude/icons");
 
     let drag_revealer = get_object!(builder, "drag_revealer", gtk::Revealer);
     let main_content = get_object!(builder, "main_content", adw::ToolbarView);
@@ -139,7 +246,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     let load_cancel: Rc<RefCell<Arc<AtomicBool>>> =
         Rc::new(RefCell::new(Arc::new(AtomicBool::new(false))));
 
-    // Start loading `path` on a worker thread; returns whether the load was
+    // Start loading `input` on a worker thread; returns whether the load was
     // accepted (false only for an unresolvable path). Stops the old song
     // immediately and supersedes any load still in flight.
     let start_load = clone!(
@@ -165,10 +272,11 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         load_gen,
         #[strong]
         load_cancel,
-        move |path: &str| -> bool {
-            // Non-local GFiles surface as "" via path().unwrap_or_default()
-            // at the call sites; report that directly, not as a read error.
-            if path.is_empty() {
+        move |input: LoadInput| -> bool {
+            // An empty path means the file was never resolvable (replaces
+            // the old path().unwrap_or_default() == "" check at call sites);
+            // report that directly, not as a read error.
+            if matches!(&input, LoadInput::Path(path) if path.is_empty()) {
                 error_page.set_description(Some(
                     "Could not resolve the dropped/selected file path (non-local file?).",
                 ));
@@ -190,11 +298,34 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
             main_stack.set_visible_child_name("loading-view");
 
             let (tx, rx) = std::sync::mpsc::channel::<LoadResult>();
-            let owned = path.to_string();
-            std::thread::spawn(move || {
-                let result = MidiEngine::parse_file(&owned, DENSITY_BINS, &flag);
-                let _ = tx.send((gen, result));
-            });
+            match input {
+                LoadInput::Path(path) => {
+                    spawn_parse_worker(ParseSource::Path(path), gen, flag, tx);
+                }
+                LoadInput::Remote { file, name } => {
+                    // Opening the stream goes through JNI, which is only
+                    // valid on attached threads: open here on the main thread
+                    // (fast regardless of size — no data moves yet). The
+                    // per-read path auto-attaches instead, so the worker may
+                    // stream from the open handle on any thread.
+                    match file.read(gio::Cancellable::NONE) {
+                        Ok(stream) => spawn_parse_worker(
+                            ParseSource::Stream {
+                                stream: SendStream(stream),
+                                name,
+                            },
+                            gen,
+                            flag,
+                            tx,
+                        ),
+                        Err(e) => {
+                            error_page
+                                .set_description(Some(&format!("Failed to read file: {e}")));
+                            main_stack.set_visible_child_name("error-view");
+                        }
+                    }
+                }
+            }
 
             // Poll for completion on the main loop: cheap, non-blocking, and
             // it self-removes once this generation resolves or is superseded.
@@ -339,12 +470,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                     return false;
                 };
                 if let Some(file) = file_list.files().first() {
-                    let path = file
-                        .path()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    return start_load(&path);
+                    return start_load(load_input_from_file(file));
                 }
                 false
             },
@@ -466,6 +592,12 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     midi_filter.add_pattern("*.MIDI");
     midi_filter.add_pattern("*.smf");
     midi_filter.add_pattern("*.SMF");
+    // MIME types are what the Android document picker filters on
+    // (EXTRA_MIME_TYPES); glob patterns are ignored there. They also make
+    // desktop portals more precise, so they are unconditional.
+    midi_filter.add_mime_type("audio/midi");
+    midi_filter.add_mime_type("audio/mid");
+    midi_filter.add_mime_type("audio/x-midi");
     let all_filter = gtk::FileFilter::new();
     all_filter.set_name(Some("All files"));
     all_filter.add_pattern("*");
@@ -494,12 +626,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                     start_load,
                     async move {
                         if let Ok(file) = file_dialog.open_future(Some(&window)).await {
-                            let path = file
-                                .path()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string();
-                            start_load(&path);
+                            start_load(load_input_from_file(&file));
                         }
                     },
                 ));

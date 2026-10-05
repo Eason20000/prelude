@@ -1,0 +1,100 @@
+name: android
+# Experimental Android APK (debug) via Pixiewood. Same triggers and artifact
+# conventions as build.yml; also reusable via workflow_call (see release.yml).
+#
+# The whole flow lives in experiments/android-app (see its README for the
+# ornament-free local equivalent). CI-specific bits only: dependency install,
+# plain (non-steam-run) NDK wrapper scripts, and artifact packaging.
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version suffix for artifact names, e.g. -v1.2.0 (empty for plain names)"
+        type: string
+        default: ""
+jobs:
+  android:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned revision comes from experiments/android-app/pixiewood.lock;
+      # build-android.sh refuses to run on drift.
+      - name: Clone Pixiewood at locked revision
+        run: |
+          set -euo pipefail
+          rev=$(grep -oP '^pixiewood\s*=\s*"\K[0-9a-f]+' experiments/android-app/pixiewood.lock)
+          git clone https://github.com/sp1ritCS/gtk-android-builder.git pixiewood
+          git -C pixiewood checkout "$rev"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: "pip"
+          cache-dependency-path: experiments/android-app/requirements.txt
+      - run: python -m pip install -r experiments/android-app/requirements.txt
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Install system deps
+        # gir1.2-gtk-4.0 / gir1.2-adw-1 are introspection DATA for
+        # blueprint-compiler only (no headers linked); the runtime itself
+        # always comes from the Pixiewood wraps.
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y \
+            perl libglib-perl libglib-object-introspection-perl libipc-run-perl \
+            libjson-perl libset-scalar-perl libxml-libxml-perl libxml-libxslt-perl \
+            build-essential pkg-config glslc gobject-introspection gir1.2-appstream \
+            gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-dev-bin libglib2.0-dev libxml2-utils sassc git gettext \
+            desktop-file-utils apksigner blueprint-compiler
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+      - name: Install SDK packages
+        run: |
+          set -euo pipefail
+          # `yes` dies of SIGPIPE (141) once sdkmanager exits; only
+          # sdkmanager's own status matters, so drop pipefail for this line.
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          test "${PIPESTATUS[1]}" -eq 0
+          set -o pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+      - name: Build APK
+        env:
+          PIXIEWOOD_DIR: ${{ github.workspace }}/pixiewood
+          MESON_BIN: meson
+          PRELUDE_ANDROID_SYSROOT: ${{ runner.temp }}/sysroot-aarch64
+          ANDROID_WRAP_DIR: ${{ runner.temp }}/android-wrap
+        run: |
+          set -euo pipefail
+          cd experiments/android-app
+          # Single source of truth for the cross env (same file as local
+          # builds; pre-set vars above win over its defaults).
+          source ./env.sh
+          # Plain NDK wrappers (no steam-run outside NixOS).
+          TC="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir -p "$ANDROID_WRAP_DIR"
+          printf '#!/bin/sh\nexec "%s/aarch64-linux-android31-clang" "$@"\n' "$TC" > "$ANDROID_WRAP_DIR/clang-aarch64"
+          printf '#!/bin/sh\nexec "%s/llvm-ar" "$@"\n' "$TC" > "$ANDROID_WRAP_DIR/llvm-ar-aarch64"
+          chmod +x "$ANDROID_WRAP_DIR"/clang-aarch64 "$ANDROID_WRAP_DIR"/llvm-ar-aarch64
+          ./build-android.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          SUFFIX="${{ inputs.version }}"
+          SRC="experiments/android-app/.pixiewood/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk"
+          cp "$SRC" "prelude$SUFFIX-android-arm64.apk"
+          sha256sum "prelude$SUFFIX-android-arm64.apk" > "prelude$SUFFIX-android-arm64.apk.sha256"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prelude-android
+          path: |
+            prelude-*
+          if-no-files-found: error
+          retention-days: 7

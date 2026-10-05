@@ -5,9 +5,13 @@
 //! `cargo build` falls back to the defaults below (which match a default
 //! `meson install` with no `--prefix`).
 
+#[cfg(not(target_os = "android"))]
 use std::path::PathBuf;
 
 const APP_ID_ENV: Option<&str> = option_env!("APP_ID");
+// Desktop-only: Android embeds the bundle (see `EMBEDDED_GRESOURCE` in
+// lib.rs) and never resolves install-tree paths.
+#[cfg(not(target_os = "android"))]
 const PKGDATADIR_ENV: Option<&str> = option_env!("PKGDATADIR");
 
 pub(crate) fn app_id() -> &'static str {
@@ -17,6 +21,7 @@ pub(crate) fn app_id() -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 pub(crate) fn pkgdatadir() -> &'static str {
     match PKGDATADIR_ENV {
         Some(dir) => dir,
@@ -29,6 +34,7 @@ pub(crate) fn pkgdatadir() -> &'static str {
 /// work without installing to the build-time prefix. Falls back to the
 /// Meson-baked `pkgdatadir()` above (which keeps the previous behavior of
 /// failing loudly when nothing is found).
+#[cfg(not(target_os = "android"))]
 pub(crate) fn gresource_path() -> PathBuf {
     const FILE: &str = "prelude.gresource";
 

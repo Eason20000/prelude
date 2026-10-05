@@ -1,0 +1,16 @@
+# Pinned Android toolchain revisions (verified 2026-10-05).
+#
+# Pixiewood tracks GTK main; its manifest format and meson requirements drift
+# (we already hit: metainfo xmlns, <releases> for semver, Meson >= 1.9).
+# build-android.sh refuses to run against a different pixiewood revision —
+# bump this file deliberately, then re-verify prepare/generate/build.
+[toolchain]
+pixiewood               = "ec343fe16ce12f770fb86590b60c5697fde6af19"
+android-commandline-tools = "13114758"
+android-ndk             = "27.2.12479018"
+android-platform        = "android-36"
+android-build-tools     = "36.0.0"
+jdk                     = "17"
+meson                   = "1.12.1"
+rust                    = "1.99.0 (stable, rustup + aarch64/x86_64-linux-android)"
+blueprint-compiler      = "0.20.4"
