@@ -34,7 +34,7 @@ stdenv.mkDerivation {
     inherit (cargoToml.package) version;
     pname = cargoToml.package.name;
     src = self;
-    hash = "sha256-PU7z4eEIZtuR3NbhVUqnsejpQQyIoSIvl99hc16wFeU=";
+    hash = "sha256-nySMsrGs3f3UDL+6FsQ05515NGQS9VPOkM+NFiciD1s=";
   };
 
   nativeBuildInputs = [
