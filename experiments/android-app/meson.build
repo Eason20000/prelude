@@ -8,7 +8,7 @@
 project(
     'prelude-android-app',
     'c',
-    version: '0.1.2',
+    version: '0.1.3',
     license: 'GPL-3.0-only',
     # `android_exe_type` requires Meson 1.9 (Pixiewood README).
     meson_version: '>= 1.9',
