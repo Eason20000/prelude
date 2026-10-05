@@ -1,26 +1,34 @@
 #!/usr/bin/env bash
-# One-command Android build for Prelude (debug APK).
+# One-command Android build for Prelude.
 #
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Flow: pixiewood prepare (first run / --reprepare) → generate →
-# apply-android-patches.sh → build → verify. Everything Android-specific
-# lives in experiments/; the repo root build is untouched.
+# Debug APK by default (desktop convention); PRELUDE_RELEASE=1 selects
+# release (fresh-configured runtime, cargo --release, Gradle assembleRelease,
+# debug-keystore signing). Everything Android-specific lives in experiments/;
+# the repo root build is untouched.
 #
 # Prerequisites: source ./env.sh first (plus the toolchain shell, see
 # README.md). The whole flow must run with the same environment.
 #
 # Usage: ./build-android.sh [--reprepare]
+#        PRELUDE_RELEASE=1 ./build-android.sh
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 PIXIEWOOD_DIR="${PIXIEWOOD_DIR:-$HOME/android-work/gtk-android-builder}"
 MESON_BIN="${MESON_BIN:-$HOME/android-work/pyenv/bin/meson}"
-APK="app-arm64-v8a-debug.apk"
+if [ -n "${PRELUDE_RELEASE:-}" ]; then
+    APK_SUBDIR="release"
+    APK="app-arm64-v8a-release.apk"
+else
+    APK_SUBDIR="debug"
+    APK="app-arm64-v8a-debug.apk"
+fi
 
 # --- tool checks -----------------------------------------------------------
-for tool in perl "$MESON_BIN" cargo java adb; do
+for tool in perl "$MESON_BIN" cargo java adb keytool; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "build-android: missing tool: $tool (source ./env.sh + toolchain shell first)" >&2
         exit 1
@@ -54,14 +62,22 @@ meta_ver=$(grep -oP -m1 '<release version="\K[^"]+' data/top.vikasmi.Prelude.met
 touch ../../src/lib.rs ../../src/engine.rs ../../src/application.rs \
     ../../src/main.rs ../../src/config.rs
 
-# --- prepare (first run or forced) ------------------------------------------
-# The Android sysroot must NOT leak into configure: Meson resolves
-# build-machine tools (e.g. glib-mkenums for harfbuzz) through pkg-config,
-# and a sysroot-prefixed tool path from a foreign .pc fails the build on a
-# fresh sysroot. Cargo (at build time) is the only consumer of the sysroot.
+# --- prepare (first run, forced, or release) ----------------------------------
+# The staged pkg-config path must NOT leak into configure: Meson resolves
+# build-machine tools through pkg-config, and the Android .pc files would
+# shadow the host ones. Cargo (at build time) is the only consumer.
+# Release always starts from a clean configure: `meson setup` cannot flip
+# buildtype in place, and the Gradle assemble type follows this flag too.
+if [ -n "${PRELUDE_RELEASE:-}" ]; then
+    rm -rf .pixiewood/bin-aarch64
+fi
 if [ ! -f .pixiewood/bin-aarch64/build.ninja ] || [ "${1:-}" = "--reprepare" ]; then
+    prepare_args=()
+    if [ -n "${PRELUDE_RELEASE:-}" ]; then
+        prepare_args+=(--release)
+    fi
     env -u PKG_CONFIG_PATH -u PKG_CONFIG_SYSROOT_DIR \
-        perl "$PIXIEWOOD_DIR/pixiewood" prepare --meson "$MESON_BIN" \
+        perl "$PIXIEWOOD_DIR/pixiewood" prepare "${prepare_args[@]}" --meson "$MESON_BIN" \
         -s "$ANDROID_HOME" -t "$ANDROID_NDK_HOME" pixiewood.xml
 else
     echo "build-android: reusing configured .pixiewood (pass --reprepare to redo)"
@@ -98,8 +114,32 @@ done
 
 perl "$PIXIEWOOD_DIR/pixiewood" build
 
+# --- sign release (debug keystore; publishing keys are future work) ---------
+if [ -n "${PRELUDE_RELEASE:-}" ]; then
+    KEYSTORE="${ANDROID_DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}"
+    if [ ! -f "$KEYSTORE" ]; then
+        keytool -genkeypair -keystore "$KEYSTORE" -alias androiddebugkey \
+            -storepass android -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    fi
+    APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+    [ -x "$APKSIGNER" ] || {
+        echo "build-android: apksigner missing under \$ANDROID_HOME/build-tools/36.0.0" >&2
+        exit 1
+    }
+    UNSIGNED=".pixiewood/android/app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk"
+    SIGNED=".pixiewood/android/app/build/outputs/apk/release/$APK"
+    [ -f "$UNSIGNED" ] || {
+        echo "build-android: expected $UNSIGNED missing" >&2
+        exit 1
+    }
+    "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass:android --key-pass:android \
+        --out "$SIGNED" "$UNSIGNED"
+    "$APKSIGNER" verify "$SIGNED"
+fi
+
 # --- verify ------------------------------------------------------------------
-APK_PATH=".pixiewood/android/app/build/outputs/apk/debug/$APK"
+APK_PATH=".pixiewood/android/app/build/outputs/apk/$APK_SUBDIR/$APK"
 [ -f "$APK_PATH" ] || {
     echo "build-android: expected $APK_PATH missing" >&2
     exit 1

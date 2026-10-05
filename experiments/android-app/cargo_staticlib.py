@@ -5,6 +5,10 @@ copies the resulting `libprelude.a` to the Meson-declared @OUTPUT@.
 The Android cross environment (PKG_CONFIG_*, CC_*, linker wrap, Rust
 toolchain) is inherited from the ambient environment (android-env.sh);
 only Cargo-specific inputs come from argv.
+
+argv: cargo, manifest, target-dir, triple, profile-dir, out, [extra-args...]
+The profile dir and any extra cargo flags (e.g. --release) are decided by
+meson.build from PRELUDE_RELEASE, so the two can never skew.
 """
 
 import os
@@ -14,16 +18,17 @@ import sys
 
 
 def main() -> int:
-    cargo, manifest, target_dir, triple, out = sys.argv[1:6]
+    cargo, manifest, target_dir, triple, profile_dir, out, *extra_args = \
+        sys.argv[1:]
     env = dict(os.environ)
     env["CARGO_TARGET_DIR"] = target_dir
     subprocess.run(
-        [cargo, "build", "--target", triple, "--lib",
-         "--manifest-path", manifest],
+        [cargo, "build", "--lib", "--target", triple,
+         "--manifest-path", manifest] + extra_args,
         env=env,
         check=True,
     )
-    built = os.path.join(target_dir, triple, "debug", "libprelude.a")
+    built = os.path.join(target_dir, triple, profile_dir, "libprelude.a")
     shutil.copy(built, out)
     return 0
 

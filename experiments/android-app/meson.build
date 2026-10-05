@@ -57,7 +57,17 @@ gres = custom_target(
 # .a path) follow the Meson host machine Pixiewood configures per build dir.
 # The pkg-config sysroot comes from the ambient PRELUDE_ANDROID_SYSROOT env
 # (android-env.sh), one sysroot per arch.
+#
+# Build profile follows PRELUDE_RELEASE (CI sets 1; local default is debug,
+# mirroring the desktop convention of debug-by-default). Single source of
+# truth: the cargo flag and the .a path below both derive from this one read.
 android_triple = host_machine.cpu_family() == 'aarch64' ? 'aarch64-linux-android' : 'x86_64-linux-android'
+cargo_profile = run_command(
+    py3,
+    '-c', 'import os; print("release" if os.environ.get("PRELUDE_RELEASE") == "1" else "debug")',
+    check: true,
+).stdout().strip()
+cargo_extra_args = cargo_profile == 'release' ? ['--release'] : []
 cargo_target_dir = meson.project_build_root() / 'cargo-target'
 cargo_build = custom_target(
     'cargo-staticlib',
@@ -78,8 +88,10 @@ cargo_build = custom_target(
         repo_root / 'Cargo.toml',
         cargo_target_dir,
         android_triple,
+        cargo_profile,
         '@OUTPUT@',
-    ],
+    ]
+    + cargo_extra_args,
 )
 
 # 4. Final link: C entry + JNI MIDI bridge + whole Rust staticlib, loaded
@@ -92,8 +104,9 @@ executable(
     # The Rust staticlib leaves NDK native deps unresolved by design (a
     # staticlib is an unlinked archive); the final link supplies them.
     # midir's Android backend needs libamidi (API 29+).
+    # Release profile: cargo_staticlib.py builds --release; keep in sync.
     link_args: [
-        cargo_target_dir / android_triple / 'debug' / 'libprelude.a',
+        cargo_target_dir / android_triple / cargo_profile / 'libprelude.a',
         '-lamidi',
     ],
     # Ordering only: the .a above is produced by cargo, opaque to Meson.

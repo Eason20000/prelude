@@ -68,6 +68,7 @@ jobs:
         env:
           PIXIEWOOD_DIR: ${{ github.workspace }}/pixiewood
           MESON_BIN: meson
+          PRELUDE_RELEASE: 1
           PRELUDE_ANDROID_SYSROOT: ${{ runner.temp }}/sysroot-aarch64
           ANDROID_WRAP_DIR: ${{ runner.temp }}/android-wrap
         run: |

@@ -48,9 +48,15 @@ nix shell --impure nixpkgs#steam-run nixpkgs#perl \
 ```bash
 cd experiments/android-app
 source ./env.sh
-./build-android.sh            # generate → patch → build → verify
+./build-android.sh            # generate → patch → build → verify (debug APK)
 adb install -r .pixiewood/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
+
+Debug is the default (desktop convention).
+`PRELUDE_RELEASE=1 ./build-android.sh` selects release end to end:
+fresh-configured runtime (`--strip`), cargo `--release`, Gradle
+`assembleRelease`, signed with a throwaway debug keystore (publishing keys are
+future work — see TODOS.md). CI always builds release.
 
 `--reprepare` forces a Pixiewood prepare rerun. Versions (`Cargo.toml` vs
 metainfo, pixiewood rev vs lock) are asserted by the script — bump them
