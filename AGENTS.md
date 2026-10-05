@@ -140,7 +140,10 @@ Pre-commit gate: `nix fmt`, then inside `nix develop` run `cargo build` and
 UI/resources changed, also `meson setup builddir --prefix="$PWD/.prefix"` once,
 then `meson compile -C builddir && meson install -C builddir` per change and run
 `./.prefix/bin/prelude` (`cargo build` alone compiles but the binary needs
-installed resources to open a window).
+installed resources to open a window). `nix build` is the last confirmation
+only, not the daily gate: it runs in a fresh sandbox every time (no incremental
+cargo/meson cache), so it is slow — run it before release or after
+packaging-relevant changes, never per edit.
 
 ## Lint
 
@@ -171,6 +174,9 @@ must be held (in `imp`) or the connection is dropped.
   duplicated.
 - `src = self` is git-filtered: new or renamed source files are invisible to
   `nix build` until `git add`ed.
+- CI `nix.yml` is the strictest gate: `nix flake check` then `nix build` (whose
+  checkPhase runs `cargo test` + release clippy). Cachix cache `prelude`
+  substitutes on every run but only pushes on GitHub Release.
 - After changing `Cargo.toml`, regenerate the lock with
   `nix develop -c cargo generate-lockfile`.
 - `nix run .` works via `meta.mainProgram`; there is no `apps` output.

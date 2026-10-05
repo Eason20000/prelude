@@ -1,0 +1,29 @@
+name: nix
+# Nix gate: flake check first, then the full build. Runs unconditionally on
+# every push/PR (no paths filter by decision). The Cachix cache is pull-only
+# except on release (skipPush); without CACHIX_AUTH_TOKEN the workflow still
+# verifies, it just never pushes.
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - run: nix flake check
+  build:
+    needs: check
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: cachix/cachix-action@v17
+        with:
+          name: prelude
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          skipPush: ${{ github.event_name != 'release' }}
+      - run: nix build --print-build-logs
