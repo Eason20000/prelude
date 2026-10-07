@@ -5,6 +5,10 @@ install_data(
     install_dir: get_option('datadir') / 'applications',
 )
 install_data(
+    'top.vikasmi.Prelude.metainfo.xml',
+    install_dir: get_option('datadir') / 'metainfo',
+)
+install_data(
     'top.vikasmi.Prelude.gschema.xml',
     install_dir: get_option('datadir') / 'glib-2.0' / 'schemas',
 )

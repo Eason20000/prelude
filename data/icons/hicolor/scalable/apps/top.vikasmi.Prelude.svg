@@ -1,4 +1,7 @@
 <?xml version="1.0"?>
+<!-- TEMP PLACEHOLDER. Single branding source (see branding/README.md). -->
+<!-- Derived files must be regenerated via branding/generate.py, never -->
+<!-- hand-edited: *-symbolic.svg, android ic_launcher_foreground.xml. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <rect x="4" y="4" width="56" height="56" rx="12" fill="#3584e4"/>
   <circle cx="24" cy="44" r="7" fill="#ffffff"/>

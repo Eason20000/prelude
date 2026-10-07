@@ -914,8 +914,12 @@ fn format_info(engine: &MidiEngine) -> String {
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = adw::AboutDialog::builder()
         .application_name("Prelude")
+        .application_icon("top.vikasmi.Prelude")
         .version(env!("CARGO_PKG_VERSION"))
         .developer_name("Eason20000")
+        .copyright("© Eason20000")
+        .website("https://github.com/Eason20000/prelude")
+        .issue_url("https://github.com/Eason20000/prelude/issues")
         .license_type(gtk::License::Gpl30)
         .build();
     dialog.present(Some(window));

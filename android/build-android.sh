@@ -47,11 +47,22 @@ have_rev=$(git -C "$PIXIEWOOD_DIR" rev-parse HEAD)
     exit 1
 }
 
-# --- version sync: Cargo.toml vs metainfo ----------------------------------
+# --- version sync: Cargo.toml vs metainfo/Info.plist -----------------------
 cargo_ver=$(grep -oP '^version = "\K[^"]+' ../Cargo.toml)
 meta_ver=$(grep -oP -m1 '<release version="\K[^"]+' data/top.vikasmi.Prelude.metainfo.xml)
+desk_ver=$(grep -oP -m1 '<release version="\K[^"]+' ../data/top.vikasmi.Prelude.metainfo.xml)
+plist_ver=$(grep -A1 '<key>CFBundleShortVersionString</key>' ../packaging/macos/Info.plist | grep -oP '<string>\K[^<]+')
+plist_build=$(grep -A1 '<key>CFBundleVersion</key>' ../packaging/macos/Info.plist | grep -oP '<string>\K[^<]+')
 [ "$cargo_ver" = "$meta_ver" ] || {
     echo "build-android: version drift: Cargo.toml $cargo_ver vs metainfo $meta_ver" >&2
+    exit 1
+}
+[ "$cargo_ver" = "$desk_ver" ] || {
+    echo "build-android: version drift: Cargo.toml $cargo_ver vs desktop metainfo $desk_ver" >&2
+    exit 1
+}
+[ "$cargo_ver" = "$plist_ver" ] && [ "$cargo_ver" = "$plist_build" ] || {
+    echo "build-android: version drift: Cargo.toml $cargo_ver vs Info.plist $plist_ver/$plist_build" >&2
     exit 1
 }
 

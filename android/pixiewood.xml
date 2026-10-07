@@ -11,8 +11,9 @@
   <style>
     <theme name="adw"/>
     <icon type="generate">
+      <!-- Background is the single brand blue (see branding/README.md). -->
       <drawable target="foreground" type="avd" path="src://data/ic_launcher_foreground.xml"/>
-      <color target="background">#1c71d8</color>
+      <color target="background">#3584e4</color>
     </icon>
   </style>
   <dependencies>

@@ -349,13 +349,12 @@ for subsequent research.
 - **Expected**: Keep the constants and add a "logical pixels" comment.
 - **Rationale**: P3.
 
-### D2. Dead CSS — `ui/style.css:11-16`
+### D2. Dead CSS — `ui/style.css:11-16` — **Fixed**
 
-- **Context**: `.midi-icon` is not referenced by any `.blp`/`.rs`;
+- **Context**: `.midi-icon` was not referenced by any `.blp`/`.rs`;
   `.midi-density-view`/`.page-turn-view` now both have a corresponding
   `add_css_class`.
-- **Location**: `.midi-icon` is a dead rule.
-- **Expected**: Remove it or annotate the intent to keep it.
+- **Resolution**: rule removed during branding governance; no visual change.
 - **Rationale**: P3.
 
 ### D3. Asymmetric Margins and Spacing — `ui/window.blp:123-130,184`

@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
-<!-- Pixiewood build input: kept minimal on purpose. Display content lives -->
-<!-- in data/top.vikasmi.Prelude.metainfo.xml; only the <release> version -->
-<!-- here matters (asserted against Cargo.toml by build-android.sh). -->
+<!-- Desktop store metadata. Display content mirrors
+     android/data/top.vikasmi.Prelude.metainfo.xml (kept minimal for
+     Pixiewood); the <release> version here must match Cargo.toml. -->
 <component xmlns="https://specifications.freedesktop.org/metainfo/1.0" type="desktop-application">
   <id>top.vikasmi.Prelude</id>
   <name>Prelude</name>
@@ -10,8 +9,14 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <description>
-    <p>Open a MIDI file and control playback. Experimental Android build.</p>
+    <p>Open a MIDI file and control playback.</p>
   </description>
+  <icon type="stock">top.vikasmi.Prelude</icon>
+  <developer>
+    <name>Eason20000</name>
+  </developer>
+  <url type="homepage">https://github.com/Eason20000/prelude</url>
+  <url type="bugtracker">https://github.com/Eason20000/prelude/issues</url>
   <launchable type="desktop-id">top.vikasmi.Prelude.desktop</launchable>
   <releases>
     <release version="0.1.3" date="2026-10-06"/>

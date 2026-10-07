@@ -49,7 +49,14 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust             mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler mingw-w64-ucrt-x86_64-librsvg
+      - name: Branding consistency check (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          # Single-source placeholder icons (see branding/README.md).
+          python3 branding/generate.py check
+          if [ "$RUNNER_OS" = "Linux" ]; then desktop-file-validate data/top.vikasmi.Prelude.desktop; fi
       - name: Meson setup + compile (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -78,6 +85,11 @@ jobs:
           cp data/top.vikasmi.Prelude.gschema.xml stage/share/glib-2.0/schemas/
           glib-compile-schemas stage/share/glib-2.0/schemas
           cp -r data/icons/hicolor stage/share/icons/
+          # Windows has no system icon theme for the exe to inherit: ship a
+          # .ico rendered from the single brand source (see branding/).
+          # (.rc embedding would need a build.rs, which the project forbids.)
+          for s in 16 24 32 48 64 128 256; do rsvg-convert -w "$s" -h "$s" data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o "icon-${s}.png"; done
+          python3 branding/generate.py png-to-ico icon-16.png icon-24.png icon-32.png icon-48.png icon-64.png icon-128.png icon-256.png -o stage/top.vikasmi.Prelude.ico
           test -d /ucrt64/share/icons/Adwaita || { echo "Adwaita icons not installed"; exit 1; }
           cp -r /ucrt64/share/icons/Adwaita stage/share/icons/
           cp -r /ucrt64/lib/gdk-pixbuf-2.0/*/loaders stage/lib/gdk-pixbuf-2.0/

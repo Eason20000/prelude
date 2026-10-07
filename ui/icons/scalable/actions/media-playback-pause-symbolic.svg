@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Transport pause glyph in Adwaita Symbolic style, drawn to complete the -->
+<!-- bundled set (CC-BY-SA-3.0, see README.md). -->
+<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 0 16 16" width="16px">
+  <path d="m 4 2 h 3 c 0.55 0 1 0.45 1 1 v 10 c 0 0.55 -0.45 1 -1 1 h -3 c -0.55 0 -1 -0.45 -1 -1 v -10 c 0 -0.55 0.45 -1 1 -1 z m 0 0" fill="#2e3436"/>
+  <path d="m 9 2 h 3 c 0.55 0 1 0.45 1 1 v 10 c 0 0.55 -0.45 1 -1 1 h -3 c -0.55 0 -1 -0.45 -1 -1 v -10 c 0 -0.55 0.45 -1 1 -1 z m 0 0" fill="#2e3436"/>
+</svg>
