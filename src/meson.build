@@ -2,8 +2,9 @@ gnome = import('gnome')
 
 # Bundle the Meson-compiled .ui files (generated into the build root, hence the
 # explicit source_dir) into an installed .gresource bundle. ui/icons holds
-# app-bundled symbolic icons (desktop window.blp uses them; the Android
-# staticlib embeds the same bundle).
+# app-bundled icons (Adwaita symbolic set + launcher glyph copy, all under
+# icons/scalable/<context>/); the bundle is registered as an icon-theme
+# fallback on every platform, and the Android staticlib embeds it.
 resources = gnome.compile_resources(
     'prelude',
     'prelude.gresource.xml',

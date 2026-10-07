@@ -198,10 +198,12 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
-    // Android ships no system icon theme; the APK carries app-bundled Adwaita
-    // symbolic icons (ui/icons → GResource). Desktop resolves from the
-    // system theme and never registers this path, so nothing is shadowed.
-    #[cfg(target_os = "android")]
+    // No platform is guaranteed a system icon theme on every surface
+    // (Android never has one; Windows/macOS portable trees resolve only
+    // their bundled hicolor dir when told where it is), so the GResource
+    // bundle (ui/icons → icons/...) is registered everywhere as a fallback
+    // for the names used in UI and About. Installs with a system theme keep
+    // resolving the same names from that theme.
     gtk::IconTheme::for_display(&display).add_resource_path("/top/vikasmi/Prelude/icons");
 
     let drag_revealer = get_object!(builder, "drag_revealer", gtk::Revealer);

@@ -13,6 +13,9 @@ Derived files are generated, never hand-edited:
 - `data/icons/hicolor/symbolic/apps/top.vikasmi.Prelude-symbolic.svg`
 - `android/data/ic_launcher_foreground.xml` (adaptive-icon foreground;
   background `#3584e4` in `android/pixiewood.xml`)
+- `ui/icons/scalable/apps/top.vikasmi.Prelude.svg` (copy for the GResource
+  bundle, so the About dialog resolves without a system theme; registered as
+  fallback on every platform)
 
 Regenerate / verify with:
 

@@ -4,9 +4,9 @@
     <file preprocess="xml-stripblanks">window.ui</file>
     <file preprocess="xml-stripblanks">port_settings.ui</file>
     <!-- App-bundled symbolic icons (Adwaita, CC-BY-SA-3.0; see
-         ui/icons/README.md). Used on Android only (registered via
-         IconTheme::add_resource_path under cfg(target_os)); desktop keeps
-         resolving them from the system icon theme. -->
+         ui/icons/README.md). Registered on every platform as a fallback
+         (see application.rs); installs with a system theme keep resolving
+         the same names from that theme. -->
     <file preprocess="xml-stripblanks">icons/scalable/actions/document-open-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/open-menu-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/actions/media-playback-start-symbolic.svg</file>
@@ -17,5 +17,10 @@
     <file preprocess="xml-stripblanks">icons/scalable/places/folder-music-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/status/dialog-warning-symbolic.svg</file>
     <file preprocess="xml-stripblanks">icons/scalable/status/dialog-information-symbolic.svg</file>
+    <!-- Launcher glyph copy for the in-app About dialog (single source:
+         data/icons/..., synced by branding/generate.py). Platforms without
+         a system icon theme (Android, portable trees) would otherwise show
+         a blank icon. -->
+    <file preprocess="xml-stripblanks">icons/scalable/apps/top.vikasmi.Prelude.svg</file>
   </gresource>
 </gresources>
