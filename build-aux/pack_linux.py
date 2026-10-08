@@ -84,12 +84,17 @@ def main(argv: list[str]) -> int:
                 appdir / "usr" / "share" / "glib-2.0" / "schemas"
                 / schemas[0].name)
     # Upstream metadata: silences appimagetool's AppStream warning and ships
-    # real store metadata inside the AppImage.
+    # real store metadata inside the AppImage. Installed under both the
+    # modern .metainfo.xml name and the legacy .appdata.xml name: older
+    # appimagetool only looks for the latter (derived from the desktop id).
     metainfos = sorted((builddir / "data").glob("*.metainfo.xml"))
     if metainfos:
         metainfo_dir = appdir / "usr" / "share" / "metainfo"
         metainfo_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(metainfos[0], metainfo_dir / metainfos[0].name)
+        legacy = metainfos[0].name.replace(".metainfo.xml", ".appdata.xml")
+        if legacy != metainfos[0].name:
+            shutil.copy(metainfos[0], metainfo_dir / legacy)
     run(["glib-compile-schemas",
          str(appdir / "usr" / "share" / "glib-2.0" / "schemas")])
     for b in (appdir / "AppRun", appdir / "usr" / "bin" / "prelude"):
