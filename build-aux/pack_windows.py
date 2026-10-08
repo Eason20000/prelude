@@ -34,7 +34,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--source-root", type=Path, required=True)
     p.add_argument("--stage", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--msys-prefix", type=Path, default=Path("/ucrt64"))
+    p.add_argument("--msys-prefix", type=Path, default=None,
+                       help="MSYS2 UCRT64 root (default: derived from the "
+                            "running python, i.e. <prefix>/bin/python3.exe; "
+                            "/ucrt64 only inside a POSIX-translating shell)")
     p.add_argument("--installer", action="store_true")
     p.add_argument("--version", default="")
     args = p.parse_args(argv)
@@ -42,7 +45,16 @@ def main(argv: list[str]) -> int:
     builddir = args.builddir
     src = args.source_root
     stage = args.stage
-    msys = args.msys_prefix
+    if args.msys_prefix is not None:
+        msys = args.msys_prefix
+    else:
+        # The mingw python doing the packing does no POSIX path translation,
+        # so a literal /ucrt64 would resolve to the drive root (D:\ucrt64)
+        # instead of the MSYS2 install (e.g. D:\a\_temp\msys64\ucrt64 on CI).
+        # Derive the prefix from our own location, which is always
+        # <prefix>/bin/python3.exe regardless of where MSYS2 lives.
+        msys = Path(sys.executable).resolve().parent.parent
+    print(f"pack_windows: msys-prefix={msys}", flush=True)
     exe = builddir / "src" / "prelude"
     # cargo names the binary prelude.exe on Windows hosts.
     if not exe.with_suffix(".exe").is_file() and exe.is_file():
