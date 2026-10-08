@@ -40,6 +40,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+      # sccache covers both languages here: RUSTC_WRAPPER for the
+      # aarch64-linux-android Rust cross-compile, and the NDK clang C/C++
+      # build via the cross-file launcher patched in by
+      # build-aux/patch_meson_cross.py (same GHA backend as desktop).
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Enable sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+      # Registry-only cargo cache (sccache handles compilation; the target
+      # dir stays hermetic per Pixiewood build dir, same split as desktop).
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-android-${{ runner.os }}-
       - name: Install system deps
         # gir1.2-gtk-4.0 / gir1.2-adw-1 are introspection DATA for
         # blueprint-compiler only (no headers linked); the runtime itself

@@ -59,6 +59,16 @@ python3 ../build-aux/check_version.py \
 # Meson listed no Rust inputs. Both meson.build files now declare narrowed
 # inputs + build_always_stale, so cargo rechecks every build by itself.
 
+# --- sccache launcher for the NDK compilers ---------------------------------
+# Pixiewood wires NDK clang into Meson via prepare/android.cross in its own
+# checkout (not our ANDROID_WRAP_DIR shims, which only serve cargo linking),
+# and Meson cross builds require the launcher written explicitly (no
+# CC_LAUNCHER env). Patched here, BEFORE prepare configures anything, so no
+# reconfigure is ever needed on fresh trees. CI provides sccache; local
+# builds without it leave the template alone (install + --reprepare to pick
+# it up later; uninstall reverts via backup).
+python3 ../build-aux/patch_meson_cross.py
+
 # --- prepare (first run, forced, or release) ----------------------------------
 # The staged pkg-config path must NOT leak into configure: Meson resolves
 # build-machine tools through pkg-config, and the Android .pc files would
@@ -78,6 +88,18 @@ if [ ! -f .pixiewood/bin-aarch64/build.ninja ] || [ "${1:-}" = "--reprepare" ]; 
         -s "$ANDROID_HOME" -t "$ANDROID_NDK_HOME" pixiewood.xml
 else
     echo "build-android: reusing configured .pixiewood (pass --reprepare to redo)"
+fi
+
+# --- stale-tree guard for the sccache launcher --------------------------------
+# A reused .pixiewood configured before the template was patched (or after a
+# revert) still points at the bare compiler; reconfigure once so ninja picks
+# up the current template. Fresh prepares never land here.
+if [ -f .pixiewood/bin-aarch64/build.ninja ] \
+    && command -v sccache >/dev/null 2>&1 \
+    && ! grep -q sccache .pixiewood/bin-aarch64/build.ninja 2>/dev/null; then
+    echo "build-android: cross template changed since configure; reconfiguring"
+    env -u PKG_CONFIG_PATH -u PKG_CONFIG_SYSROOT_DIR \
+        "$MESON_BIN" setup --reconfigure .pixiewood/bin-aarch64
 fi
 
 # --- generate + patches ------------------------------------------------------
