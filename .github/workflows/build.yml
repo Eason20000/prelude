@@ -41,14 +41,16 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         if: runner.os != 'Windows'
-      # sccache eval (Linux only for now): GHA-backed compiler cache shared
-      # across branches. No build-file changes needed — RUSTC_WRAPPER reaches
-      # cargo through process env, which our Meson cargo_env passes through.
-      - name: Setup sccache (Linux eval)
-        if: runner.os == 'Linux'
+      # sccache (Unix): GHA-backed compiler cache shared across branches.
+      # No build-file changes needed — RUSTC_WRAPPER reaches cargo through
+      # process env, which our Meson cargo_env passes through. Validated on
+      # Linux (72s -> 14s, 100% hits); macOS shares the same model.
+      # Windows/MSYS2 stays out until its PATH story is proven in CI.
+      - name: Setup sccache (Unix)
+        if: runner.os != 'Windows'
         uses: mozilla-actions/sccache-action@v0.0.11
-      - name: Enable sccache (Linux eval)
-        if: runner.os == 'Linux'
+      - name: Enable sccache (Unix)
+        if: runner.os != 'Windows'
         run: |
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
@@ -125,8 +127,8 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: meson compile -C builddir pack-macos
-      - name: sccache stats (Linux eval)
-        if: runner.os == 'Linux'
+      - name: sccache stats (Unix)
+        if: runner.os != 'Windows'
         run: sccache --show-stats
       - name: Upload artifact
         uses: actions/upload-artifact@v7
