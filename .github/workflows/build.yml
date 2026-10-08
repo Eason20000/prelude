@@ -60,19 +60,19 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          meson setup --buildtype=release -Dinstaller=true builddir
+          meson setup --buildtype=release -Dinstaller=true -Dversion_suffix="${{ inputs.version }}" builddir
       - name: Meson setup (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          meson setup --buildtype=release -Dfetch_external=true builddir
+          meson setup --buildtype=release -Dfetch_external=true -Dversion_suffix="${{ inputs.version }}" builddir
       - name: Meson setup (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
-          meson setup --buildtype=release builddir
+          meson setup --buildtype=release -Dversion_suffix="${{ inputs.version }}" builddir
       - name: Compile + branding (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -95,50 +95,32 @@ jobs:
       - name: Pack (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          meson compile -C builddir pack-windows
-          SUFFIX="${{ inputs.version }}"
-          mv builddir/prelude-windows-x64.zip "prelude$SUFFIX-windows-x64.zip"
-          sha256sum "prelude$SUFFIX-windows-x64.zip" > "prelude$SUFFIX-windows-x64.zip.sha256"
-          # Inno installer: pack_windows.py generated builddir/prelude_inno.iss
-          # (--installer); iscc runs here where choco provides it.
+        # Artifact names (incl. release suffix) are decided by Meson
+        # (-Dversion_suffix=); this step only builds. The Inno .iss was
+        # generated alongside (--installer); iscc runs below via choco.
+        run: meson compile -C builddir pack-windows
       - name: Installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           choco install innosetup -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" builddir/prelude_inno.iss
-          $SUFFIX = "${{ inputs.version }}"
-          $exe = Get-ChildItem builddir/Output/*.exe | Select-Object -First 1
-          $dest = "prelude$SUFFIX-windows-x64-setup.exe"
-          Copy-Item $exe.FullName $dest
-          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
-          "$hash  $dest" | Out-File "$dest.sha256" -Encoding ascii
       - name: Pack (Linux AppImage)
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          meson compile -C builddir pack-linux
-          SUFFIX="${{ inputs.version }}"
-          mv builddir/Prelude-linux-x64.AppImage "Prelude$SUFFIX-linux-x64.AppImage"
-          sha256sum "Prelude$SUFFIX-linux-x64.AppImage" > "Prelude$SUFFIX-linux-x64.AppImage.sha256"
+        run: meson compile -C builddir pack-linux
       - name: Pack (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: |
-          set -euo pipefail
-          meson compile -C builddir pack-macos
-          SUFFIX="${{ inputs.version }}"
-          mv builddir/Prelude-macos-arm64.dmg "Prelude$SUFFIX-macos-arm64.dmg"
-          shasum -a 256 "Prelude$SUFFIX-macos-arm64.dmg" > "Prelude$SUFFIX-macos-arm64.dmg.sha256"
+        run: meson compile -C builddir pack-macos
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: prelude-${{ matrix.asset }}
           path: |
-            prelude-*
-            Prelude-*
+            builddir/prelude-*
+            builddir/Prelude-*
+            builddir/Output/*.exe
+            builddir/Output/*.sha256
           if-no-files-found: error
           retention-days: 7

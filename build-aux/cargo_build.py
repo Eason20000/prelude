@@ -8,15 +8,18 @@ is inherited untouched; only Cargo-specific inputs come from argv.
 
 Desktop:
     cargo_build.py --mode bin --cargo cargo --manifest Cargo.toml \\
-        --target-dir DIR --profile release --output @OUTPUT@ [-- APP_ID=...]
+        --target-dir DIR --profile release --artifact-name prelude \\
+        --output @OUTPUT@
 
 Android:
     cargo_build.py --mode lib --cargo cargo --manifest Cargo.toml \\
         --target-dir DIR --triple aarch64-linux-android --profile release \\
-        --output @OUTPUT@ [--extra-arg ...]
+        --artifact-name libprelude.a --output @OUTPUT@
 
 Profile flag and artifact path derive from the same ``--profile`` value so
-the two can never skew (the Meson side passes one string).
+the two can never skew; the artifact file name (including any Windows
+``.exe`` suffix, which Meson decides via ``host_machine.system()``) is
+passed in explicitly, never probed for.
 """
 
 from __future__ import annotations
@@ -51,21 +54,8 @@ def produced_artifact(args: argparse.Namespace) -> Path:
     if args.mode == "lib":
         if not args.triple:
             raise SystemExit("cargo_build.py: --triple required in lib mode")
-        return target / args.triple / args.profile / "libprelude.a"
-    name = args.bin_name or "prelude"
-    if os.name == "nt" or sys.platform == "win32":
-        name += ".exe"
-    # Cargo appends .exe on Windows hosts even when cross-reporting; the
-    # Meson side passes the same host check, so mirror it here by probing
-    # for the suffixed file first when unstated.
-    candidate = target / args.profile / name
-    if candidate.is_file():
-        return candidate
-    # Fallback for Windows cross builds reporting without suffix knowledge.
-    plain = target / args.profile / name.removesuffix(".exe")
-    if plain.is_file():
-        return plain
-    return candidate
+        return target / args.triple / args.profile / args.artifact_name
+    return target / args.profile / args.artifact_name
 
 
 def main(argv: list[str]) -> int:
@@ -78,6 +68,9 @@ def main(argv: list[str]) -> int:
                         default="debug")
     parser.add_argument("--triple", default="")
     parser.add_argument("--bin-name", default="prelude")
+    parser.add_argument("--artifact-name", required=True,
+                        help="exact file name cargo produces "
+                             "(e.g. prelude, prelude.exe, libprelude.a)")
     parser.add_argument("--output", required=True)
     parser.add_argument("--extra-arg", action="append", default=[])
     args = parser.parse_args(argv)

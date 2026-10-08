@@ -40,6 +40,9 @@ def main(argv: list[str]) -> int:
                             "/ucrt64 only inside a POSIX-translating shell)")
     p.add_argument("--installer", action="store_true")
     p.add_argument("--version", default="")
+    p.add_argument("--version-suffix", default="",
+                       help="release suffix baked into the installer file name "
+                            "(e.g. -v1.2.0; empty for plain names)")
     args = p.parse_args(argv)
 
     builddir = args.builddir
@@ -55,10 +58,6 @@ def main(argv: list[str]) -> int:
         # <prefix>/bin/python3.exe regardless of where MSYS2 lives.
         msys = Path(sys.executable).resolve().parent.parent
     print(f"pack_windows: msys-prefix={msys}", flush=True)
-    exe = builddir / "src" / "prelude"
-    # cargo names the binary prelude.exe on Windows hosts.
-    if not exe.with_suffix(".exe").is_file() and exe.is_file():
-        pass
 
     (stage / "bin").mkdir(parents=True, exist_ok=True)
     (stage / "share" / "prelude").mkdir(parents=True, exist_ok=True)
@@ -155,6 +154,7 @@ def main(argv: list[str]) -> int:
         iss = Path("prelude_inno.iss")
         text = iss_in.read_text()
         text = text.replace("@VERSION@", args.version or "0.0.0")
+        text = text.replace("@VERSION_SUFFIX@", args.version_suffix)
         text = text.replace("@STAGE@", stage.resolve().as_posix())
         iss.write_text(text)
         iscc = shutil.which("iscc") or shutil.which("ISCC.exe")
@@ -163,6 +163,12 @@ def main(argv: list[str]) -> int:
                   "(install Inno Setup to build it)")
         else:
             run([iscc, str(iss)])
+            setups = sorted((iss.parent / "Output").glob("*.exe"))
+            if setups:
+                digest = hashlib.sha256(setups[0].read_bytes()).hexdigest()
+                setups[0].with_suffix(setups[0].suffix + ".sha256").write_text(
+                    f"{digest}  {setups[0].name}\n")
+                print(f"pack_windows: installer -> {setups[0]}")
     return 0
 
 

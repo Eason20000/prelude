@@ -114,6 +114,7 @@ cargo_build = custom_target(
         '--target-dir', cargo_target_dir,
         '--triple', android_triple,
         '--profile', cargo_profile,
+        '--artifact-name', 'libprelude.a',
         '--output', '@OUTPUT@',
     ],
 )

@@ -33,3 +33,10 @@ option(
     value: false,
     description: 'Allow pack helpers to fetch external binaries (linuxdeploy). CI passes true; local stays offline by default.',
 )
+
+option(
+    'version_suffix',
+    type: 'string',
+    value: '',
+    description: 'Suffix baked into pack artifact names, e.g. -v1.2.0 for releases (empty for plain names).',
+)

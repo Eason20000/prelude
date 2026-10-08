@@ -61,12 +61,11 @@ localedir = prefix / get_option('localedir')
 datadir = prefix / get_option('datadir')
 pkgdatadir = datadir / meson.project_name()
 gettext_package = meson.project_name()
-
 # Release date for metainfo <release>: SOURCE_DATE_EPOCH when set
 # (reproducible CI), else today. Never hand-edited in data/.
 release_date = run_command(
     python3,
-    '-c', 'import datetime, os; print(datetime.datetime.fromtimestamp(int(os.environ.get("SOURCE_DATE_EPOCH", "0")) or 0, datetime.timezone.utc).date().isoformat() if os.environ.get("SOURCE_DATE_EPOCH") else datetime.date.today().isoformat())',
+    meson.project_source_root() / 'build-aux/release_date.py',
     check: true,
 ).stdout().strip()
 
@@ -180,16 +179,18 @@ run_command(
 )
 
 # Portable packaging entries: local and CI share one spelling
-# (meson compile pack-windows/pack-linux/pack-macos). External downloaders
-# (linuxdeploy) and platform tools (iscc/dylibbundler) run inside the
-# scripts; CI only passes --fetch-external / --version-suffix.
+# (meson compile pack-windows/pack-linux/pack-macos). Artifact file names
+# (including the release -Dversion_suffix=) are decided here, not in CI:
+# CI only uploads what Meson produced. External downloaders (linuxdeploy)
+# and platform tools (iscc/dylibbundler) run inside the scripts.
+version_suffix = get_option('version_suffix')
 pack_windows = custom_target(
     'pack-windows',
     input: [desktop_out, metainfo_out, gschema_out],
     depends: [cargo_bin, resources],
     build_by_default: false,
     console: true,
-    output: 'prelude-windows-x64.zip',
+    output: 'prelude@0@-windows-x64.zip'.format(version_suffix),
     command: [
         python3,
         meson.project_source_root() / 'build-aux/pack_windows.py',
@@ -198,6 +199,7 @@ pack_windows = custom_target(
         '--stage', meson.project_build_root() / 'stage-win',
         '--output', meson.project_build_root() / '@OUTPUT@',
         '--version', version,
+        '--version-suffix', version_suffix,
     ]
     + (get_option('installer') ? ['--installer'] : []),
 )
@@ -207,7 +209,7 @@ pack_linux = custom_target(
     depends: [cargo_bin, resources],
     build_by_default: false,
     console: true,
-    output: 'Prelude-linux-x64.AppImage',
+    output: 'Prelude@0@-linux-x64.AppImage'.format(version_suffix),
     command: [
         python3,
         meson.project_source_root() / 'build-aux/pack_linux.py',
@@ -223,7 +225,7 @@ pack_macos = custom_target(
     depends: [cargo_bin, resources],
     build_by_default: false,
     console: true,
-    output: 'Prelude-macos-arm64.dmg',
+    output: 'Prelude@0@-macos-arm64.dmg'.format(version_suffix),
     command: [
         python3,
         meson.project_source_root() / 'build-aux/pack_macos.py',

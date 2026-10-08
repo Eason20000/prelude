@@ -113,7 +113,8 @@ nix build && nix run .
   templates via `configure_file` + `i18n.merge_file` (single `APP_ID`/`VERSION`
   in root `meson.build`; `-Dprofile=development` appends `.Devel`,
   `-Dapp_id_suffix=` overrides). `meson.options` also holds `tests`, `installer`
-  (Windows Inno Setup), `fetch_external` (linuxdeploy download, CI only).
+  (Windows Inno Setup), `fetch_external` (linuxdeploy download, CI only),
+  `version_suffix` (baked into pack artifact names, e.g. `-v1.2.0`).
   `src/config.rs` reads `APP_ID`/`VERSION` via `option_env!()` with a
   plain-cargo fallback — never generate it, never `configure_file`+`cp` it.
   `gresource_path()` locates the bundle relative to the executable
@@ -123,9 +124,9 @@ nix build && nix run .
   `cargo-fmt-check` / `cargo-test` / `cargo-clippy` are the shared lint/test
   spellings (local = Nix checkPhase = CI); `meson compile pack-windows` /
   `pack-linux` / `pack-macos` assemble the release artifacts via
-  `build-aux/pack_*.py` (CI only renames + uploads); `meson dist` embeds
-  `vendor/` via `build-aux/dist-vendor.sh`. `packaging/macos/Info.plist.in` is
-  substituted by Meson — never hand-bump it with `Cargo.toml`.
+  `build-aux/pack_*.py` (CI only uploads); `meson dist` embeds `vendor/` via
+  `build-aux/dist-vendor.sh`. `packaging/macos/Info.plist.in` is substituted by
+  Meson — never hand-bump it with `Cargo.toml`.
 
 ## Dependencies (non-obvious)
 

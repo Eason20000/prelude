@@ -44,6 +44,10 @@ cargo_inputs = files(
     'page_view.rs',
 )
 
+# Cargo appends .exe to binaries on Windows hosts. Meson decides the suffix
+# declaratively; the helper only joins the path it is given, never probes.
+bin_suffix = host_machine.system() == 'windows' ? '.exe' : ''
+
 cargo_bin = custom_target(
     'cargo-build',
     input: cargo_inputs,
@@ -64,6 +68,7 @@ cargo_bin = custom_target(
         '--target-dir', cargo_target_dir,
         '--profile', cargo_profile,
         '--bin-name', meson.project_name(),
+        '--artifact-name', meson.project_name() + bin_suffix,
         '--output', '@OUTPUT@',
     ],
 )

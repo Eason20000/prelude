@@ -46,7 +46,6 @@ def main(argv: list[str]) -> int:
     p.add_argument("--builddir", type=Path, required=True)
     p.add_argument("--source-root", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--version-suffix", default="")
     p.add_argument("--fetch-external", action="store_true")
     args = p.parse_args(argv)
 
