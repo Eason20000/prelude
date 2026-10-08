@@ -90,7 +90,7 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then
             desktop=$(ls builddir/data/*.desktop | head -1)
             desktop-file-validate "$desktop"
-            appstreamcli validate --no-net "builddir/data/"*.metainfo.xml || true
+            appstreamcli validate --no-net "builddir/data/"*.metainfo.xml
           fi
       - name: Pack (Windows)
         if: runner.os == 'Windows'

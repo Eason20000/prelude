@@ -10,12 +10,26 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <description>
-    <p>Open a MIDI file and control playback.</p>
+    <p>
+      Open a MIDI file and control playback with play, pause, stop and seek.
+      Pick any file from the file dialog and choose where it sounds.
+    </p>
+    <p>
+      Follow along with the page-turn view and the density overview, and
+      choose the output port from the port settings.
+    </p>
   </description>
   <icon type="stock">@APP_ID@</icon>
-  <developer>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <!-- Reversed-name developer id (Loupe pattern); unrated OARS declaration
+       (Pika Backup pattern: empty content_rating silences the check). -->
+  <developer id="top.vikasmi">
     <name>Eason20000</name>
   </developer>
+  <content_rating type="oars-1.1" />
   <url type="homepage">https://github.com/Eason20000/prelude</url>
   <url type="bugtracker">https://github.com/Eason20000/prelude/issues</url>
   <launchable type="desktop-id">@APP_ID@.desktop</launchable>
