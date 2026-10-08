@@ -41,7 +41,10 @@ def build_argv(args: argparse.Namespace) -> list[str]:
     ]
     if args.mode == "lib":
         cmd += ["--lib", "--target", args.triple]
-    if args.bin_name:
+    else:
+        # --bin only in bin mode: passing it alongside --lib made cargo
+        # build the whole crate twice (once per artifact), which the
+        # Android CI log caught red-handed.
         cmd += ["--bin", args.bin_name]
     if args.profile == "release":
         cmd.append("--release")
