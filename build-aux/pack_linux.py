@@ -8,8 +8,7 @@ present so the build stays offline-friendly.
 
 Usage:
     python3 build-aux/pack_linux.py --builddir builddir --source-root . \\
-        --output Prelude-linux-x64.AppImage [--version-suffix -v1.2.0]
-        [--fetch-external]
+        --output Prelude-linux-x64.AppImage [--fetch-external]
 """
 
 from __future__ import annotations
@@ -59,24 +58,38 @@ def main(argv: list[str]) -> int:
 
     shutil.copy(builddir / "src" / "prelude", appdir / "usr" / "bin" / "prelude")
     desktops = sorted((builddir / "data").glob("*.desktop"))
-    top_desktop = desktops[0] if desktops else None
-    if top_desktop is not None:
-        shutil.copy(top_desktop, appdir / top_desktop.name)
-    run(["rsvg-convert", "-w", "256", "-h", "256",
+    if not desktops:
+        print("pack_linux: no .desktop in builddir/data", file=sys.stderr)
+        return 1
+    # App-id derives from the generated desktop name, so development
+    # (.Devel) builds stay consistent everywhere without a flag.
+    app_id = desktops[0].stem
+    shutil.copy(desktops[0], appdir / desktops[0].name)
+    # Icon is rendered at pack time from the single brand SVG (see
+    # branding/generate.py); nothing derived is committed. 512px is the
+    # largest resolution linuxdeploy accepts into hicolor.
+    icon_png = appdir / f"{app_id}.png"
+    run(["rsvg-convert", "-w", "512", "-h", "512",
          str(src / "data" / "icons" / "hicolor" / "scalable" / "apps"
              / "top.vikasmi.Prelude.svg"),
-         "-o", str(appdir / "top.vikasmi.Prelude.png")])
+         "-o", str(icon_png)])
     shutil.copy(src / "packaging" / "appimage" / "AppRun", appdir / "AppRun")
     shutil.copy(builddir / "src" / "prelude.gresource",
                 appdir / "usr" / "share" / "prelude" / "prelude.gresource")
     schemas = sorted((builddir / "data").glob("*.gschema.xml"))
-    shutil.copy(schemas[0] if schemas else
-                src / "data" / "top.vikasmi.Prelude.gschema.xml",
-                appdir / "usr" / "share" / "glib-2.0" / "schemas" / "schema.xml")
-    # Restore the real filename when falling back is not needed.
-    if schemas:
-        (appdir / "usr" / "share" / "glib-2.0" / "schemas" / "schema.xml").rename(
-            appdir / "usr" / "share" / "glib-2.0" / "schemas" / schemas[0].name)
+    if not schemas:
+        print("pack_linux: no .gschema.xml in builddir/data", file=sys.stderr)
+        return 1
+    shutil.copy(schemas[0],
+                appdir / "usr" / "share" / "glib-2.0" / "schemas"
+                / schemas[0].name)
+    # Upstream metadata: silences appimagetool's AppStream warning and ships
+    # real store metadata inside the AppImage.
+    metainfos = sorted((builddir / "data").glob("*.metainfo.xml"))
+    if metainfos:
+        metainfo_dir = appdir / "usr" / "share" / "metainfo"
+        metainfo_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(metainfos[0], metainfo_dir / metainfos[0].name)
     run(["glib-compile-schemas",
          str(appdir / "usr" / "share" / "glib-2.0" / "schemas")])
     for b in (appdir / "AppRun", appdir / "usr" / "bin" / "prelude"):
@@ -98,7 +111,14 @@ def main(argv: list[str]) -> int:
     env = dict(os.environ)
     env["PATH"] = f"{Path.cwd()}{os.pathsep}{env.get('PATH', '')}"
     env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-    run([str(ld), "--appdir", "AppDir", "--plugin", "gtk",
+    # --desktop-file/--icon-file are what INSTALL the files linuxdeploy then
+    # links into the AppDir root; hand-dropping them (done above, still
+    # needed for the custom AppRun) is not recognized on its own.
+    run([str(ld), "--appdir", "AppDir",
+         "--desktop-file", str(appdir / desktops[0].name),
+         "--icon-file", str(icon_png),
+         "--icon-filename", app_id,
+         "--plugin", "gtk",
          "--output", "appimage"], env=env)
     produced = sorted(Path(".").glob("Prelude-x86_64.AppImage"))
     if not produced:

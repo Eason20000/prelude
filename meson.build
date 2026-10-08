@@ -6,7 +6,6 @@ project(
     meson_version: '>= 1.4',
 )
 
-gnome = import('gnome')
 i18n = import('i18n')
 
 dependency('gtk4', version: '>= 4.14')
@@ -236,13 +235,10 @@ pack_macos = custom_target(
     ],
 )
 
+# Single post-install path (replaces gnome.post_install, which duplicated
+# the same three refreshes and warned on platforms without the tools, where
+# we never `meson install` anyway).
 meson.add_install_script(
     'build-aux/meson_post_install.py',
     prefix,
-)
-
-gnome.post_install(
-    gtk_update_icon_cache: true,
-    glib_compile_schemas: true,
-    update_desktop_database: true,
 )
