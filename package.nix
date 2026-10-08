@@ -12,6 +12,7 @@
   meson,
   ninja,
   pkg-config,
+  python3,
   wrapGAppsHook4,
   blueprint-compiler,
   desktop-file-utils,
@@ -50,6 +51,9 @@ stdenv.mkDerivation {
     cargo
     rustc
     clippy
+    # Explicit: Meson run_command helpers (version.py etc.) need it even
+    # though meson itself pulls in a Python transitively.
+    python3
   ];
   buildInputs = [
     gtk4

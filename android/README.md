@@ -58,9 +58,10 @@ fresh-configured runtime (`--strip`), cargo `--release`, Gradle
 `assembleRelease`, signed with a throwaway debug keystore (publishing keys are
 future work — see TODOS.md). CI always builds release.
 
-`--reprepare` forces a Pixiewood prepare rerun. Versions (`Cargo.toml` vs
-metainfo, pixiewood rev vs lock) are asserted by the script — bump them
-deliberately, never silently.
+`--reprepare` forces a Pixiewood prepare rerun. Versions (`Cargo.toml` single
+source of truth vs `meson.project_version()` vs metainfo) are asserted by
+`build-aux/check_version.py` — at Meson setup and from `build-android.sh`; bump
+`Cargo.toml` only, never the derivatives deliberately.
 
 arm64 only (`pixiewood.xml`): real devices. The x86_64 emulator flow is gone and
 its cargo link never had a matching sysroot — one line to bring back.
@@ -73,8 +74,9 @@ alongside the desktop ones.
 
 - `generate` rewrites the manifest every run: custom bits must go through
   `apply-android-patches.sh` (idempotent), never hand-edited.
-- Meson cannot see Rust sources: `build-android.sh` touches them so cargo always
-  rechecks instead of trusting fingerprints.
+- Meson cannot see Cargo's dep graph: both `meson.build` files declare narrowed
+  Rust inputs + `build_always_stale`, so cargo rechecks every build by itself
+  (no `touch` hack).
 - `src://` metainfo includes need the freedesktop `xmlns` + a `<releases>` entry
   or `generate` dies.
 - The GDK content backend crashes on unattached threads; keep opens on the main

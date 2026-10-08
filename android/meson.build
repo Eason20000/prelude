@@ -63,20 +63,42 @@ gres = custom_target(
 # Build profile follows PRELUDE_RELEASE (CI sets 1; local default is debug,
 # mirroring the desktop convention of debug-by-default). Single source of
 # truth: the cargo flag and the .a path below both derive from this one read.
+# Version truth stays Cargo.toml: setup fails loudly on drift (same gate as
+# the desktop root meson.build).
+cargo_version_check = run_command(
+    py3,
+    repo_root / 'build-aux/check_version.py',
+    '--manifest', repo_root / 'Cargo.toml',
+    '--meson-version', meson.project_version(),
+    '--android-metainfo', repo_root / 'android/data/top.vikasmi.Prelude.metainfo.xml',
+    check: true,
+)
 android_triple = host_machine.cpu_family() == 'aarch64' ? 'aarch64-linux-android' : 'x86_64-linux-android'
 cargo_profile = run_command(
     py3,
     '-c', 'import os; print("release" if os.environ.get("PRELUDE_RELEASE") == "1" else "debug")',
     check: true,
 ).stdout().strip()
-cargo_extra_args = cargo_profile == 'release' ? ['--release'] : []
 cargo_target_dir = meson.project_build_root() / 'cargo-target'
 cargo_build = custom_target(
     'cargo-staticlib',
+    # Narrowed always-stale inputs (shared with desktop src/meson.build):
+    # Meson still cannot see Cargo's graph, so the target always runs and
+    # lets cargo no-op when fresh — no `touch` hack needed in
+    # build-android.sh anymore.
+    input: files(
+        '../Cargo.lock',
+        '../Cargo.toml',
+        '../src/application.rs',
+        '../src/config.rs',
+        '../src/engine.rs',
+        '../src/lib.rs',
+        '../src/main.rs',
+        '../src/midi_view.rs',
+        '../src/page_view.rs',
+    ),
     output: 'libprelude.a',
     depends: gres,
-    # Cargo owns incremental rebuild detection; Meson cannot see Rust
-    # sources as inputs, so always run and let cargo no-op when fresh.
     build_always_stale: true,
     console: true,
     env: [
@@ -85,15 +107,15 @@ cargo_build = custom_target(
     ],
     command: [
         py3,
-        files('cargo_staticlib.py'),
-        cargo_prog.full_path(),
-        repo_root / 'Cargo.toml',
-        cargo_target_dir,
-        android_triple,
-        cargo_profile,
-        '@OUTPUT@',
-    ]
-    + cargo_extra_args,
+        repo_root / 'build-aux/cargo_build.py',
+        '--mode', 'lib',
+        '--cargo', cargo_prog.full_path(),
+        '--manifest', repo_root / 'Cargo.toml',
+        '--target-dir', cargo_target_dir,
+        '--triple', android_triple,
+        '--profile', cargo_profile,
+        '--output', '@OUTPUT@',
+    ],
 )
 
 # 4. Final link: C entry + JNI MIDI bridge + whole Rust staticlib, loaded
@@ -106,7 +128,8 @@ executable(
     # The Rust staticlib leaves NDK native deps unresolved by design (a
     # staticlib is an unlinked archive); the final link supplies them.
     # midir's Android backend needs libamidi (API 29+).
-    # Release profile: cargo_staticlib.py builds --release; keep in sync.
+    # Release profile: build-aux/cargo_build.py derives --release from the
+    # same --profile flag; keep in sync via cargo_profile above.
     link_args: [
         cargo_target_dir / android_triple / cargo_profile / 'libprelude.a',
         '-lamidi',

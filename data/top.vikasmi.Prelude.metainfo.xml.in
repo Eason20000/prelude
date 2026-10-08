@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Desktop store metadata. Display content mirrors
      android/data/top.vikasmi.Prelude.metainfo.xml (kept minimal for
-     Pixiewood); the <release> version here must match Cargo.toml. -->
+     Pixiewood); version/date are substituted by Meson from Cargo.toml,
+     so this file is never hand-versioned. -->
 <component xmlns="https://specifications.freedesktop.org/metainfo/1.0" type="desktop-application">
-  <id>top.vikasmi.Prelude</id>
+  <id>@APP_ID@</id>
   <name>Prelude</name>
   <summary>A MIDI file player built with GTK4 and libadwaita</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -11,14 +12,14 @@
   <description>
     <p>Open a MIDI file and control playback.</p>
   </description>
-  <icon type="stock">top.vikasmi.Prelude</icon>
+  <icon type="stock">@APP_ID@</icon>
   <developer>
     <name>Eason20000</name>
   </developer>
   <url type="homepage">https://github.com/Eason20000/prelude</url>
   <url type="bugtracker">https://github.com/Eason20000/prelude/issues</url>
-  <launchable type="desktop-id">top.vikasmi.Prelude.desktop</launchable>
+  <launchable type="desktop-id">@APP_ID@.desktop</launchable>
   <releases>
-    <release version="0.1.3" date="2026-10-06"/>
+    <release version="@VERSION@" date="@RELEASE_DATE@"/>
   </releases>
 </component>

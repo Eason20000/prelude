@@ -20,49 +20,50 @@ resources = gnome.compile_resources(
 )
 
 # Cargo owns all Rust compilation and dependency resolution; Meson only fixes
-# the target dir and forwards build metadata (APP_ID) via the environment,
-# read in src/config.rs with option_env!().
-cargo_build_options = ['--manifest-path', meson.project_source_root() / 'Cargo.toml']
+# the target dir and forwards build metadata (APP_ID/VERSION/...) via the
+# environment, read in src/config.rs with option_env!().
 if get_option('buildtype') == 'release'
-    cargo_build_options += ['--release']
-    rust_target = 'release'
+    cargo_profile = 'release'
 else
-    rust_target = 'debug'
+    cargo_profile = 'debug'
 endif
 
-cargo_build = custom_target(
-    'cargo-build',
-    build_by_default: true,
-    build_always_stale: true,
-    # NOTE: cargo owns its output layout under CARGO_TARGET_DIR, which Meson
-    # cannot enumerate; this name is ordering-only. The real artifact is
-    # consumed below by absolute path, ordered via depends:.
-    output: rust_target,
-    console: true,
-    depends: resources,
-    env: cargo_env,
-    command: [cargo, 'build', cargo_build_options],
+# Narrowed always-stale: Meson still cannot see Cargo's dep graph, so the
+# target always runs and lets cargo no-op when fresh — but listing the
+# load-bearing inputs keeps renames/deletions visible in introspection
+# instead of a blind unconditional rebuild.
+cargo_inputs = files(
+    '../Cargo.lock',
+    '../Cargo.toml',
+    'application.rs',
+    'config.rs',
+    'engine.rs',
+    'lib.rs',
+    'main.rs',
+    'midi_view.rs',
+    'page_view.rs',
 )
 
-# Cargo appends .exe to binaries on Windows (cf. rnote, NixOS/nix, Vala).
-bin_suffix = ''
-if host_machine.system() == 'windows'
-    bin_suffix = '.exe'
-endif
-
-custom_target(
-    'cp-binary',
-    depends: cargo_build,
+cargo_bin = custom_target(
+    'cargo-build',
+    input: cargo_inputs,
     build_by_default: true,
     build_always_stale: true,
     install: true,
     install_dir: get_option('bindir'),
     output: meson.project_name(),
-    # Single program, no shell operators: 'cp' does not exist on Windows cmd.
+    console: true,
+    depends: resources,
+    env: cargo_env,
     command: [
         python3,
-        '-c', 'import shutil,sys;shutil.copy(sys.argv[1],sys.argv[2])',
-        cargo_target_dir / rust_target / (meson.project_name() + bin_suffix),
-        '@OUTPUT@',
+        cargo_build_helper,
+        '--mode', 'bin',
+        '--cargo', cargo.full_path(),
+        '--manifest', cargo_manifest,
+        '--target-dir', cargo_target_dir,
+        '--profile', cargo_profile,
+        '--bin-name', meson.project_name(),
+        '--output', '@OUTPUT@',
     ],
 )

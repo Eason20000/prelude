@@ -4,6 +4,19 @@ builddir/
 .prefix/
 *.AppImage
 AppDir/
+stage/
+stage-win/
+dmgstage/
+Prelude.iconset/
+icon-*.png
+*.zip
+*.dmg
+*.sha256
+prelude-*.exe
+# Meson dist + Flatpak offline inputs (regenerated, never committed).
+meson-dist/
+flatpak/cargo-sources.json
+flatpak/build/
 # Android platform shell (android/ only; never the generated dirs at the
 # repo root, where Meson would pick them up): Pixiewood-generated Gradle
 # project, Meson wrap checkouts it rewrites, and build outputs.

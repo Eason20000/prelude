@@ -1,0 +1,3 @@
+# Translations catalog (empty skeleton, P5). Add language codes here
+# (one per line) when the first .po lands; data/*.in already go through
+# i18n.merge_file so no restructuring will be needed.

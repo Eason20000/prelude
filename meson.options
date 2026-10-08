@@ -1,0 +1,35 @@
+option(
+    'profile',
+    type: 'combo',
+    choices: ['default', 'development'],
+    value: 'default',
+    description: 'Build profile. development appends .Devel to the app-id so dev and release installs can coexist.',
+)
+
+option(
+    'app_id_suffix',
+    type: 'string',
+    value: '',
+    description: 'Extra suffix appended to the base app-id (overrides the profile default when non-empty).',
+)
+
+option(
+    'tests',
+    type: 'boolean',
+    value: true,
+    description: 'Register cargo test/clippy/fmt run_targets.',
+)
+
+option(
+    'installer',
+    type: 'boolean',
+    value: false,
+    description: 'Also build the Windows Inno Setup installer in pack-windows.',
+)
+
+option(
+    'fetch_external',
+    type: 'boolean',
+    value: false,
+    description: 'Allow pack helpers to fetch external binaries (linuxdeploy). CI passes true; local stays offline by default.',
+)

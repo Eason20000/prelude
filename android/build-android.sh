@@ -47,31 +47,17 @@ have_rev=$(git -C "$PIXIEWOOD_DIR" rev-parse HEAD)
     exit 1
 }
 
-# --- version sync: Cargo.toml vs metainfo/Info.plist -----------------------
-cargo_ver=$(grep -oP '^version = "\K[^"]+' ../Cargo.toml)
-meta_ver=$(grep -oP -m1 '<release version="\K[^"]+' data/top.vikasmi.Prelude.metainfo.xml)
-desk_ver=$(grep -oP -m1 '<release version="\K[^"]+' ../data/top.vikasmi.Prelude.metainfo.xml)
-plist_ver=$(grep -A1 '<key>CFBundleShortVersionString</key>' ../packaging/macos/Info.plist | grep -oP '<string>\K[^<]+')
-plist_build=$(grep -A1 '<key>CFBundleVersion</key>' ../packaging/macos/Info.plist | grep -oP '<string>\K[^<]+')
-[ "$cargo_ver" = "$meta_ver" ] || {
-    echo "build-android: version drift: Cargo.toml $cargo_ver vs metainfo $meta_ver" >&2
-    exit 1
-}
-[ "$cargo_ver" = "$desk_ver" ] || {
-    echo "build-android: version drift: Cargo.toml $cargo_ver vs desktop metainfo $desk_ver" >&2
-    exit 1
-}
-[ "$cargo_ver" = "$plist_ver" ] && [ "$cargo_ver" = "$plist_build" ] || {
-    echo "build-android: version drift: Cargo.toml $cargo_ver vs Info.plist $plist_ver/$plist_build" >&2
-    exit 1
-}
+# --- version sync (single source: Cargo.toml) -------------------------------
+# Desktop files are derived by Meson configure_file (nothing to compare);
+# the Android metainfo is consumed by Pixiewood from the source tree, so it
+# is checked here via the shared helper (same gate runs at Meson setup).
+python3 ../build-aux/check_version.py \
+    --manifest ../Cargo.toml \
+    --android-metainfo data/top.vikasmi.Prelude.metainfo.xml
 
-# --- cargo freshness guard ---------------------------------------------------
-# Meson cannot see Rust sources as custom_target inputs, and cargo has
-# missed mtime-only changes before (stale .a linked into a fresh APK).
-# Touching is cheap (incremental rebuild) and forces a real recheck.
-touch ../src/lib.rs ../src/engine.rs ../src/application.rs \
-    ../src/main.rs ../src/config.rs
+# NOTE (retired touch hack): cargo freshness used to need `touch` because
+# Meson listed no Rust inputs. Both meson.build files now declare narrowed
+# inputs + build_always_stale, so cargo rechecks every build by itself.
 
 # --- prepare (first run, forced, or release) ----------------------------------
 # The staged pkg-config path must NOT leak into configure: Meson resolves

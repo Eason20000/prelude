@@ -2,6 +2,11 @@ name: build
 # Build check on every push; also reusable via workflow_call (see release.yml).
 # Packages and uploads artifacts in both cases.
 #
+# Thin orchestration only: assembly lives in build-aux/pack_*.py, exposed as
+# `meson compile pack-windows/pack-linux/pack-macos`, so local runs
+# reproduce CI byte-for-byte. This file only installs deps, configures Meson
+# and renames artifacts with the release suffix.
+#
 # Windows runs under MSYS2-UCRT64: only MSYS2 ships prebuilt libadwaita,
 # blueprint-compiler and a GNU Rust that links them. Shells are pinned per
 # step with literal values — expressions are rejected in shell positions, so
@@ -38,7 +43,7 @@ jobs:
         if: runner.os != 'Windows'
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils appstream
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install gtk4 libadwaita adwaita-icon-theme meson pkgconf blueprint-compiler dylibbundler
@@ -50,148 +55,83 @@ jobs:
           update: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust             mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler mingw-w64-ucrt-x86_64-librsvg
-      - name: Branding consistency check (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          set -euo pipefail
-          # Single-source placeholder icons (see branding/README.md).
-          python3 branding/generate.py check
-          if [ "$RUNNER_OS" = "Linux" ]; then desktop-file-validate data/top.vikasmi.Prelude.desktop; fi
-      - name: Meson setup + compile (Windows)
+      - name: Meson setup (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          meson setup --buildtype=release builddir
-          meson compile -C builddir
-      - name: Meson setup + compile (Unix)
-        if: runner.os != 'Windows'
+          meson setup --buildtype=release -Dinstaller=true builddir
+      - name: Meson setup (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          meson setup --buildtype=release -Dfetch_external=true builddir
+      - name: Meson setup (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
         run: |
           set -euo pipefail
           meson setup --buildtype=release builddir
-          meson compile -C builddir
-      - name: Stage files (Windows)
+      - name: Compile + branding (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          # Prefix layout (bin/lib/share): MSYS2's gdk-pixbuf is built
-          # relocatable, so it resolves its loaders and schemas relative to
-          # the exe instead of the /ucrt64 build machine.
-          mkdir -p stage/bin stage/share/prelude stage/share/glib-2.0/schemas stage/share/icons stage/lib/gdk-pixbuf-2.0
-          cp builddir/src/prelude stage/bin/prelude.exe
-          ldd stage/bin/prelude.exe | grep -o '/ucrt64/bin/[^ ]*\.dll' | sort -u | xargs -I{} cp {} stage/bin/
-          cp builddir/src/prelude.gresource stage/share/prelude/
-          cp data/top.vikasmi.Prelude.gschema.xml stage/share/glib-2.0/schemas/
-          glib-compile-schemas stage/share/glib-2.0/schemas
-          cp -r data/icons/hicolor stage/share/icons/
-          # Windows has no system icon theme for the exe to inherit: ship a
-          # .ico rendered from the single brand source (see branding/).
-          # (.rc embedding would need a build.rs, which the project forbids.)
-          for s in 16 24 32 48 64 128 256; do rsvg-convert -w "$s" -h "$s" data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o "icon-${s}.png"; done
-          python3 branding/generate.py png-to-ico icon-16.png icon-24.png icon-32.png icon-48.png icon-64.png icon-128.png icon-256.png -o stage/top.vikasmi.Prelude.ico
-          test -d /ucrt64/share/icons/Adwaita || { echo "Adwaita icons not installed"; exit 1; }
-          cp -r /ucrt64/share/icons/Adwaita stage/share/icons/
-          cp -r /ucrt64/lib/gdk-pixbuf-2.0/*/loaders stage/lib/gdk-pixbuf-2.0/
-          cp /ucrt64/lib/gdk-pixbuf-2.0/*/loaders.cache stage/lib/gdk-pixbuf-2.0/
-          ls stage/lib/gdk-pixbuf-2.0/loaders | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
-          grep -q svg stage/lib/gdk-pixbuf-2.0/loaders.cache || { echo "SVG loader missing from cache"; exit 1; }
-          if grep -q '^"/ucrt64' stage/lib/gdk-pixbuf-2.0/loaders.cache; then echo "loaders.cache is not relocatable"; exit 1; fi
-      - name: Package (Windows)
+          meson compile -C builddir
+          meson compile -C builddir check-branding
+      - name: Compile + branding + validate (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          meson compile -C builddir
+          meson compile -C builddir check-branding
+          desktop=$(ls builddir/data/*.desktop | head -1)
+          desktop-file-validate "$desktop"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            appstreamcli validate --no-net "builddir/data/"*.metainfo.xml || true
+          fi
+      - name: Pack (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          meson compile -C builddir pack-windows
+          SUFFIX="${{ inputs.version }}"
+          mv builddir/prelude-windows-x64.zip "prelude$SUFFIX-windows-x64.zip"
+          sha256sum "prelude$SUFFIX-windows-x64.zip" > "prelude$SUFFIX-windows-x64.zip.sha256"
+          # Inno installer: pack_windows.py generated builddir/prelude_inno.iss
+          # (--installer); iscc runs here where choco provides it.
+      - name: Installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $zip = "prelude${{ inputs.version }}-windows-x64.zip"
-          Copy-Item README.md, LICENSE stage/
-          Compress-Archive -Path stage/* -DestinationPath $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  $zip" | Out-File "$zip.sha256" -Encoding ascii
-      - name: Package (Linux AppImage)
+          choco install innosetup -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" builddir/prelude_inno.iss
+          $SUFFIX = "${{ inputs.version }}"
+          $exe = Get-ChildItem builddir/Output/*.exe | Select-Object -First 1
+          $dest = "prelude$SUFFIX-windows-x64-setup.exe"
+          Copy-Item $exe.FullName $dest
+          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToLower()
+          "$hash  $dest" | Out-File "$dest.sha256" -Encoding ascii
+      - name: Pack (Linux AppImage)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           set -euo pipefail
+          meson compile -C builddir pack-linux
           SUFFIX="${{ inputs.version }}"
-          mkdir -p AppDir/usr/bin AppDir/usr/share/prelude AppDir/usr/share/glib-2.0/schemas
-          cp builddir/src/prelude AppDir/usr/bin/
-          cp data/top.vikasmi.Prelude.desktop AppDir/
-          rsvg-convert -w 256 -h 256 data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o AppDir/top.vikasmi.Prelude.png
-          cp packaging/appimage/AppRun AppDir/
-          cp builddir/src/prelude.gresource AppDir/usr/share/prelude/
-          cp data/top.vikasmi.Prelude.gschema.xml AppDir/usr/share/glib-2.0/schemas/
-          glib-compile-schemas AppDir/usr/share/glib-2.0/schemas
-          chmod +x AppDir/AppRun AppDir/usr/bin/prelude
-          curl --fail --location --output linuxdeploy-x86_64.AppImage \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl --fail --location --output linuxdeploy-plugin-gtk.sh \
-            https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
-          export PATH="$PWD:$PATH"
-          export APPIMAGE_EXTRACT_AND_RUN=1
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin gtk --output appimage
-          mv Prelude-x86_64.AppImage "Prelude$SUFFIX-linux-x64.AppImage"
+          mv builddir/Prelude-linux-x64.AppImage "Prelude$SUFFIX-linux-x64.AppImage"
           sha256sum "Prelude$SUFFIX-linux-x64.AppImage" > "Prelude$SUFFIX-linux-x64.AppImage.sha256"
-      - name: Package (macOS)
+      - name: Pack (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           set -euo pipefail
+          meson compile -C builddir pack-macos
           SUFFIX="${{ inputs.version }}"
-          APP="stage/Prelude.app/Contents"
-          mkdir -p "$APP/MacOS" "$APP/Resources" "$APP/Frameworks" "$APP/Resources/share/glib-2.0/schemas"
-          cp builddir/src/prelude "$APP/MacOS/prelude-bin"
-          cp packaging/macos/Prelude "$APP/MacOS/prelude"
-          chmod +x "$APP/MacOS/prelude"
-          cp packaging/macos/Info.plist "$APP/"
-          dylibbundler -od -b -x "$APP/MacOS/prelude-bin" -d "$APP/Frameworks" -p @executable_path/../Frameworks
-          cp builddir/src/prelude.gresource "$APP/Resources/"
-          cp data/top.vikasmi.Prelude.gschema.xml "$APP/Resources/share/glib-2.0/schemas/"
-          glib-compile-schemas "$APP/Resources/share/glib-2.0/schemas"
-          cp -r data/icons/hicolor "$APP/Resources/share/icons"
-          cp -r "$(brew --prefix adwaita-icon-theme)/share/icons/Adwaita" "$APP/Resources/share/icons/"
-          # The SVG loader lives in librsvg's own prefix, not gdk-pixbuf's —
-          # collect from both, then describe them in a cache template that the
-          # launcher instantiates with bundle-absolute paths at startup
-          # (brew builds gdk-pixbuf with relocatable=false).
-          mkdir -p "$APP/Frameworks/gdk-pixbuf/loaders"
-          for prefix in "$(brew --prefix gdk-pixbuf)" "$(brew --prefix librsvg)"; do
-            cp -L "$prefix"/lib/gdk-pixbuf-2.0/*/loaders/*.so "$APP/Frameworks/gdk-pixbuf/loaders/" 2>/dev/null || true
-          done
-          ls "$APP/Frameworks/gdk-pixbuf/loaders" | grep -q svg || { echo "no SVG pixbuf loader bundled"; exit 1; }
-          chmod +w "$APP/Frameworks/gdk-pixbuf/loaders/"*
-          # dylibbundler cannot resolve @rpath references: it asks
-          # interactively, which hangs CI. Rewrite them to absolute brew paths
-          # first — dylibbundler then bundles them like any other dep.
-          for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
-            refs="$(otool -L "$loader" | grep -o '@rpath/[^ ]*' | sort -u || true)"
-            for ref in $refs; do
-              base="${ref##*/}"
-              found=""
-              for d in /opt/homebrew/opt/*/lib /opt/homebrew/lib; do
-                if [ -f "$d/$base" ]; then found="$d/$base"; break; fi
-              done
-              if [ -z "$found" ]; then echo "cannot resolve $ref in $loader"; exit 1; fi
-              echo "rewriting $ref -> $found"
-              install_name_tool -change "$ref" "$found" "$loader"
-            done
-          done
-          for loader in "$APP/Frameworks/gdk-pixbuf/loaders/"*; do
-            # No -od here: the inputs live inside the output dir, and -od
-            # would erase them (and everything else) before fixing. -of is
-            # required because deps shared with the main binary are already
-            # bundled (overwritten identically under the same -p prefix).
-            dylibbundler -of -b -x "$loader" -d "$APP/Frameworks" -p @executable_path/../Frameworks
-          done
-          APP_ABS="$PWD/stage/Prelude.app/Contents"
-          "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" "$APP_ABS/Frameworks/gdk-pixbuf/loaders/"* | sed "s|$APP_ABS|@BUNDLE_DIR@|g" > "$APP/Resources/loaders.cache.in"
-          mkdir -p Prelude.iconset
-          for spec in "16:icon_16x16" "32:icon_16x16@2x" "32:icon_32x32" "64:icon_32x32@2x" "128:icon_128x128" "256:icon_128x128@2x" "256:icon_256x256" "512:icon_256x256@2x" "512:icon_512x512" "1024:icon_512x512@2x"; do
-            s="${spec%%:*}"; n="${spec##*:}"
-            rsvg-convert -w "$s" -h "$s" data/icons/hicolor/scalable/apps/top.vikasmi.Prelude.svg -o "Prelude.iconset/${n}.png"
-          done
-          iconutil -c icns Prelude.iconset -o "$APP/Resources/Prelude.icns"
-          mkdir -p dmgstage
-          cp -r stage/Prelude.app dmgstage/
-          ln -s /Applications dmgstage/Applications
-          hdiutil create -volname Prelude -srcfolder dmgstage -ov -format UDZO "Prelude$SUFFIX-macos-arm64.dmg"
+          mv builddir/Prelude-macos-arm64.dmg "Prelude$SUFFIX-macos-arm64.dmg"
           shasum -a 256 "Prelude$SUFFIX-macos-arm64.dmg" > "Prelude$SUFFIX-macos-arm64.dmg.sha256"
       - name: Upload artifact
         uses: actions/upload-artifact@v7

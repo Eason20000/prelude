@@ -28,6 +28,10 @@
           cargo
           rustfmt
           clippy
+          # Meson helpers (version.py/cargo_build.py/pack_*.py) and the
+          # branding generator run on python3; the build sandbox gets it
+          # via meson, but the dev shell needs it explicitly.
+          python3
         ];
       };
     };

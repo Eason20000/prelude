@@ -14,6 +14,7 @@ use glib::clone;
 
 use adw::prelude::*;
 
+use crate::config;
 use crate::engine::{LOAD_CANCELLED, LoadedSong, MidiEngine, State};
 use crate::midi_view::MidiDensityView;
 use crate::page_view::PageTurnView;
@@ -916,8 +917,8 @@ fn format_info(engine: &MidiEngine) -> String {
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = adw::AboutDialog::builder()
         .application_name("Prelude")
-        .application_icon("top.vikasmi.Prelude")
-        .version(env!("CARGO_PKG_VERSION"))
+        .application_icon(config::app_id())
+        .version(config::version())
         .developer_name("Eason20000")
         .copyright("© Eason20000")
         .website("https://github.com/Eason20000/prelude")

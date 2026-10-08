@@ -2,11 +2,12 @@
 Name=Prelude
 Comment=A MIDI file player built with GTK4 and libadwaita
 Exec=prelude
-Icon=top.vikasmi.Prelude
+Icon=@APP_ID@
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;
 Keywords=Audio;MIDI;Player;GTK;
 StartupNotify=true
-StartupWMClass=top.vikasmi.Prelude
+StartupWMClass=@APP_ID@
 MimeType=audio/midi;audio/x-midi;
+DBusActivatable=true

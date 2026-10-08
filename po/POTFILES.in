@@ -1,0 +1,3 @@
+# Source files containing translatable strings (empty skeleton, P5).
+# Paths are relative to the project root; xgettext collects them for
+# `meson compile prelude-pot`.

@@ -16,8 +16,10 @@ nix build && nix run .
 - `android/` is the Android platform shell (same Rust core as staticlib + C
   entry + Pixiewood packaging, see its README): single repo because core and
   shell share one language and one release train — don't split into a second
-  repo. Desktop changes must not break it: `android/build-android.sh` asserts
-  `Cargo.toml` vs metainfo version sync, and CI `android.yml` runs on
+  repo. Desktop changes must not break it: `build-aux/check_version.py` (run at
+  both Meson setups and from `android/build-android.sh`) asserts the
+  `Cargo.toml` single source of truth against `meson.project_version()` and the
+  Pixiewood-consumed `android/data` metainfo, and CI `android.yml` runs on
   `android/**`, `src/**`, `ui/**`, `Cargo.*` changes (release builds all
   platforms via `workflow_call`).
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`,
@@ -104,13 +106,26 @@ nix build && nix run .
 - Meson is the primary build system, Nix only wraps it: root `meson.build`
   compiles each `.blp` to the build root (one explicit single-output target per
   file, no `batch-compile`), `src/meson.build` bundles them via
-  `gnome.compile_resources` and invokes Cargo with `CARGO_TARGET_DIR` / `APP_ID`
-  env, `data/meson.build` installs the desktop file, GSettings schema and icons.
-  `src/config.rs` reads `APP_ID` via `option_env!()` with a plain-cargo fallback
-  — never generate it, never `configure_file`+`cp` it. `gresource_path()`
-  locates the bundle relative to the executable (`$PRELUDE_DATADIR` override,
-  `../share/prelude`, `../Resources`, exe dir) with the baked `PKGDATADIR` as
-  fallback, so portable trees run without installing to the build prefix.
+  `gnome.compile_resources` and invokes Cargo through the shared
+  `build-aux/cargo_build.py` helper (`--mode bin` desktop / `--mode lib`
+  Android) with `CARGO_TARGET_DIR` / `APP_ID` / `VERSION` env,
+  `data/meson.build` derives desktop/metainfo/schema/service from `*.in`
+  templates via `configure_file` + `i18n.merge_file` (single `APP_ID`/`VERSION`
+  in root `meson.build`; `-Dprofile=development` appends `.Devel`,
+  `-Dapp_id_suffix=` overrides). `meson.options` also holds `tests`, `installer`
+  (Windows Inno Setup), `fetch_external` (linuxdeploy download, CI only).
+  `src/config.rs` reads `APP_ID`/`VERSION` via `option_env!()` with a
+  plain-cargo fallback — never generate it, never `configure_file`+`cp` it.
+  `gresource_path()` locates the bundle relative to the executable
+  (`$PRELUDE_DATADIR` override, `../share/prelude`, `../Resources`, exe dir)
+  with the baked `PKGDATADIR` as fallback, so portable trees run without
+  installing to the build prefix. `meson compile check-branding` /
+  `cargo-fmt-check` / `cargo-test` / `cargo-clippy` are the shared lint/test
+  spellings (local = Nix checkPhase = CI); `meson compile pack-windows` /
+  `pack-linux` / `pack-macos` assemble the release artifacts via
+  `build-aux/pack_*.py` (CI only renames + uploads); `meson dist` embeds
+  `vendor/` via `build-aux/dist-vendor.sh`. `packaging/macos/Info.plist.in` is
+  substituted by Meson — never hand-bump it with `Cargo.toml`.
 
 ## Dependencies (non-obvious)
 
@@ -135,8 +150,10 @@ nix build && nix run .
 There are no tests — no test directory, no test dependencies. Do not add testing
 infrastructure unless explicitly asked.
 
-Pre-commit gate: `nix fmt`, then inside `nix develop` run `cargo build` and
-`cargo clippy -- -D warnings` (incremental, seconds after the first build); when
+Pre-commit gate: `nix fmt`, then inside `nix develop` run
+`meson compile -C builddir cargo-clippy` (or `cargo clippy -- -D warnings` with
+Meson's `CARGO_HOME`, e.g. `CARGO_HOME=$PWD/builddir/cargo-home`) — bare
+`cargo clippy --offline` outside Meson fails (empty registry cache); when
 UI/resources changed, also `meson setup builddir --prefix="$PWD/.prefix"` once,
 then `meson compile -C builddir && meson install -C builddir` per change and run
 `./.prefix/bin/prelude` (`cargo build` alone compiles but the binary needs
@@ -198,21 +215,24 @@ parser changes. `README.md` intentionally has no roadmap.
   / devShell.
 - **CI builds all three platforms, runs no tests** —
   `.github/workflows/build.yml` (Windows MSYS2-UCRT64 / Ubuntu 26.04 / macOS 14)
-  compiles each platform via Meson with `--buildtype=release` and uploads a
-  runnable artifact (Windows zip in prefix layout, Linux AppImage via
-  `linuxdeploy --plugin gtk`, macOS `.app` in a DMG); `release.yml` publishes
-  them on GitHub Release. There is no CI smoke run — artifacts are verified by
-  manual download-and-launch. The Nix gate owns tests and lint. Windows must
-  stay on MSYS2-UCRT64 (MSVC/choco has no libadwaita or blueprint-compiler); its
-  zip mirrors an install prefix (`bin/`/`lib/`/`share/`) with the Adwaita theme
-  and the gdk-pixbuf loaders plus cache, which the relocatable MSYS2 libraries
-  resolve relative to the exe. Linux pins `ubuntu-26.04` (24.04's libadwaita 1.5
-  fails the `>=1.8` check); macOS ships unsigned (no signing or notarization —
-  first launch needs right-click → Open), collecting pixbuf loaders from both
-  the gdk-pixbuf and librsvg Homebrew prefixes (the SVG loader lives in
-  librsvg's) into a cache template instantiated at launch.
-  `packaging/macos/Info.plist` version keys are static — bump them with
-  `Cargo.toml`. Theme icons ship inside all three artifacts (bundled Adwaita).
+  configures via Meson with `--buildtype=release` and runs
+  `meson compile pack-windows/pack-linux/pack-macos` (assembly lives in
+  `build-aux/pack_*.py`, identical for local runs) then only renames + uploads a
+  runnable artifact (Windows zip in prefix layout + Inno Setup installer, Linux
+  AppImage via `linuxdeploy --plugin gtk`, macOS `.app` in a DMG); `release.yml`
+  publishes them on GitHub Release. There is no CI smoke run — artifacts are
+  verified by manual download-and-launch. The Nix gate owns tests and lint.
+  Windows must stay on MSYS2-UCRT64 (MSVC/choco has no libadwaita or
+  blueprint-compiler); its zip mirrors an install prefix
+  (`bin/`/`lib/`/`share/`) with the Adwaita theme and the gdk-pixbuf loaders
+  plus cache, which the relocatable MSYS2 libraries resolve relative to the exe.
+  Linux pins `ubuntu-26.04` (24.04's libadwaita 1.5 fails the `>=1.8` check);
+  macOS ships unsigned (no signing or notarization — first launch needs
+  right-click → Open), collecting pixbuf loaders from both the gdk-pixbuf and
+  librsvg Homebrew prefixes (the SVG loader lives in librsvg's) into a cache
+  template instantiated at launch. `packaging/macos/Info.plist.in` version keys
+  are substituted by Meson from `Cargo.toml` — never hand-bump them. Theme icons
+  ship inside all three artifacts (bundled Adwaita).
 - **App is GPL-3.0-only**; license must be preserved on reuse.
 - Target environment: **Linux** with a running ALSA sequencer or hardware MIDI
   port.

@@ -7,16 +7,16 @@
     <key>CFBundleExecutable</key>
     <string>prelude</string>
     <key>CFBundleIdentifier</key>
-    <string>top.vikasmi.Prelude</string>
+    <string>@APP_ID@</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>Prelude</string>
-    <!-- Keep in sync with Cargo.toml (asserted by android/build-android.sh). -->
+    <!-- Version substituted by Meson from Cargo.toml; never hand-edited. -->
     <key>CFBundleShortVersionString</key>
-    <string>0.1.3</string>
+    <string>@VERSION@</string>
     <key>CFBundleVersion</key>
-    <string>0.1.3</string>
+    <string>@VERSION@</string>
     <key>CFBundleIconFile</key>
     <string>Prelude</string>
     <key>CFBundlePackageType</key>
