@@ -43,7 +43,7 @@ jobs:
         if: runner.os != 'Windows'
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils appstream
+        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils appstream gettext
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install gtk4 libadwaita adwaita-icon-theme meson pkgconf blueprint-compiler dylibbundler
@@ -87,9 +87,9 @@ jobs:
           set -euo pipefail
           meson compile -C builddir
           meson compile -C builddir check-branding
-          desktop=$(ls builddir/data/*.desktop | head -1)
-          desktop-file-validate "$desktop"
           if [ "$RUNNER_OS" = "Linux" ]; then
+            desktop=$(ls builddir/data/*.desktop | head -1)
+            desktop-file-validate "$desktop"
             appstreamcli validate --no-net "builddir/data/"*.metainfo.xml || true
           fi
       - name: Pack (Windows)

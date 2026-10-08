@@ -16,6 +16,16 @@ cargo = find_program('cargo', required: true)
 python3 = find_program('python3', required: true)
 blueprint_compiler = find_program('blueprint-compiler', required: true)
 
+# i18n switch: merge/gettext wiring activates with the first .po file.
+# Until then the plain configure+install path is used, so no platform pays
+# for msgfmt/ITS tooling it doesn't use yet.
+have_po = run_command(
+    python3,
+    '-c', 'import pathlib, sys; print(len(list(pathlib.Path(sys.argv[1]).glob("*.po"))))',
+    meson.project_source_root() / 'po',
+    check: true,
+).stdout().strip() != '0'
+
 # Single source of truth: Cargo.toml [package] version. Meson project()
 # cannot run commands, so the literal above must match; the assert below
 # fails loudly at setup time instead of shipping drift.
