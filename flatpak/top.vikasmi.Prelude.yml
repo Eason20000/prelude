@@ -9,17 +9,64 @@ finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
+  - --socket=pulseaudio
   - --device=dri
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
     CARGO_NET_OFFLINE: "true"
+    PRELUDE_SF2: GeneralUser-GS.sf2
 modules:
+  # Minimal FluidSynth for GeneralUser GS: PulseAudio output, no shell,
+  # network, LADSPA, libsndfile, OpenMP or Signalsmith. Keeping Signalsmith
+  # off also keeps the FDN reverb engine selected by the app deterministic.
+  - name: fluid-synth
+    buildsystem: cmake
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_SHARED_LIBS=ON
+      - -DLIB_SUFFIX=
+      - -Denable-alsa=0
+      - -Denable-aufile=0
+      - -Denable-coreaudio=0
+      - -Denable-coremidi=0
+      - -Denable-dbus=0
+      - -Denable-dsound=0
+      - -Denable-ipv6=0
+      - -Denable-jack=0
+      - -Denable-ladspa=0
+      - -Denable-libsndfile=0
+      - -Denable-midishare=0
+      - -Denable-native-dls=0
+      - -Denable-network=0
+      - -Denable-oboe=0
+      - -Denable-openmp=0
+      - -Denable-opensles=0
+      - -Denable-oss=0
+      - -Denable-pipewire=0
+      - -Denable-portaudio=0
+      - -Denable-pulseaudio=1
+      - -Denable-readline=0
+      - -Denable-sdl3=0
+      - -Denable-signalsmith=0
+      - -Denable-systemd=0
+      - -Denable-threads=1
+      - -Denable-wasapi=0
+      - -Denable-waveout=0
+      - -Denable-winmidi=0
+    sources:
+      - type: archive
+        url: https://github.com/FluidSynth/fluidsynth/archive/refs/tags/v2.6.1.tar.gz
+        sha256: 3d258a3bf97cc20c59eeebfe62c2432fae88adda74d3ad098681c76e0ebf446b
   - name: prelude
     buildsystem: meson
     sources:
       - type: dir
         path: ../..
+      - type: file
+        url: https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60/GeneralUser-GS.sf2
+        sha256: 9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe
+        dest-filename: GeneralUser-GS.sf2
       - cargo-sources.json
       - type: shell
         commands:

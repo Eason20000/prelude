@@ -81,8 +81,32 @@ def main(argv: list[str]) -> int:
     for dll in dlls:
         shutil.copy(msys / "bin" / Path(dll).name, stage / "bin" / Path(dll).name)
 
+    required_dlls = ("libfluidsynth-3.dll", "libsndfile-1.dll")
+    missing_dlls = [
+        name for name in required_dlls
+        if not (stage / "bin" / name).is_file()
+    ]
+    if missing_dlls:
+        print(
+            "pack_windows: missing runtime DLLs: " + ", ".join(missing_dlls),
+            file=sys.stderr,
+        )
+        return 1
+
     shutil.copy(builddir / "src" / "prelude.gresource",
                 stage / "share" / "prelude" / "prelude.gresource")
+    soundfont = builddir / "data" / "GeneralUser-GS.sf2"
+    if not soundfont.is_file():
+        print("pack_windows: GeneralUser-GS.sf2 missing (build data target first)",
+              file=sys.stderr)
+        return 1
+    soundfont_dir = stage / "share" / "prelude" / "soundfonts"
+    soundfont_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(soundfont, soundfont_dir / "GeneralUser-GS.sf2")
+    license_dir = stage / "share" / "prelude" / "licenses"
+    license_dir.mkdir(parents=True, exist_ok=True)
+    for license_file in sorted((src / "data" / "licenses").glob("*.txt")):
+        shutil.copy(license_file, license_dir / license_file.name)
     # GSchema: prefer the configured (APP_ID-substituted) file from the
     # build tree, fall back to the source template for exotic setups.
     schema_candidates = sorted((builddir / "data").glob("*.gschema.xml"))

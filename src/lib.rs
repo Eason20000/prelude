@@ -3,6 +3,8 @@ mod config;
 mod engine;
 mod midi_view;
 mod page_view;
+mod platform;
+mod synth;
 
 use adw::prelude::*;
 use gtk::gio;
@@ -58,6 +60,38 @@ pub extern "C" fn prelude_android_init_midi(
     unsafe {
         ndk_context::initialize_android_context(java_vm, context);
     }
+}
+
+/// Receive the materialized GeneralUser GS path from Android. The Java side
+/// copies the APK asset to app-private storage first so the synth worker can
+/// use the exact same `fluid_synth_sfload(path)` call as desktop.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn prelude_android_set_soundfont_path(path: *const std::os::raw::c_char) {
+    if path.is_null() {
+        config::set_android_soundfont_path(std::path::PathBuf::new());
+        return;
+    }
+    // SAFETY: JNI passes a NUL-terminated UTF-8 string owned by the caller for
+    // the duration of the call.
+    let path = unsafe { std::ffi::CStr::from_ptr(path) }
+        .to_string_lossy()
+        .into_owned();
+    config::set_android_soundfont_path(std::path::PathBuf::from(path));
+}
+
+/// Android foreground/background hook. Called on the Android UI thread; it
+/// only sends a plain message, the GTK loop performs the engine changes.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn prelude_android_set_active(active: std::os::raw::c_int) {
+    application::send_lifecycle(application::LifecycleEvent::SetActive(active != 0));
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn prelude_android_shutdown() {
+    application::send_lifecycle(application::LifecycleEvent::Shutdown);
 }
 
 // UI templates live in the GResource bundle (compiled from ui/*.blp by

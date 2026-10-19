@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, Sender, TryRecvError},
 };
 
 use gtk::gdk;
@@ -15,14 +15,33 @@ use glib::clone;
 use adw::prelude::*;
 
 use crate::config;
-use crate::engine::{LOAD_CANCELLED, LoadedSong, MidiEngine, State};
+use crate::engine::{LoadedSong, MidiEngine, State};
 use crate::midi_view::MidiDensityView;
 use crate::page_view::PageTurnView;
+use crate::synth::SynthEvent;
 
+const INTERNAL_OUTPUT_NAME: &str = crate::engine::INTERNAL_OUTPUT_NAME;
+const LOAD_CANCELLED: &str = crate::engine::LOAD_CANCELLED;
 const TICK_INTERVAL_MS: u32 = 20;
 const LOAD_POLL_INTERVAL_MS: u64 = 20;
 const SEEK_STEP: f64 = 5.0;
 const DENSITY_BINS: usize = 300;
+
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) enum LifecycleEvent {
+    SetActive(bool),
+    Shutdown,
+}
+
+static LIFECYCLE_TX: std::sync::OnceLock<Sender<LifecycleEvent>> = std::sync::OnceLock::new();
+
+#[allow(dead_code)]
+pub(crate) fn send_lifecycle(event: LifecycleEvent) {
+    if let Some(sender) = LIFECYCLE_TX.get() {
+        let _ = sender.send(event);
+    }
+}
 
 macro_rules! get_object {
     ($builder:expr, $id:literal, $ty:ty) => {
@@ -34,29 +53,36 @@ macro_rules! get_object {
 
 pub(crate) struct PreludeApplication {
     engine: Rc<RefCell<MidiEngine>>,
+    lifecycle_rx: Rc<RefCell<Receiver<LifecycleEvent>>>,
 }
 
 impl PreludeApplication {
     pub(crate) fn new() -> Self {
+        let (lifecycle_tx, lifecycle_rx) = mpsc::channel();
+        let _ = LIFECYCLE_TX.set(lifecycle_tx);
         Self {
             engine: Rc::new(RefCell::new(MidiEngine::new())),
+            lifecycle_rx: Rc::new(RefCell::new(lifecycle_rx)),
         }
     }
 
     pub(crate) fn run(self, app: &adw::Application) {
         let engine = self.engine;
-        app.connect_activate(move |app| on_activate(app, engine.clone()));
+        let lifecycle_rx = self.lifecycle_rx;
+        app.connect_activate(move |app| {
+            on_activate(app, engine.clone(), lifecycle_rx.clone());
+        });
     }
 }
 
-fn select_port(row: &adw::ComboRow, ports: &[String], current: Option<&str>) {
-    if ports.is_empty() {
-        row.set_selected(gtk::INVALID_LIST_POSITION);
-        return;
-    }
+fn select_output(row: &adw::ComboRow, ports: &[String], current: Option<&str>) {
     if let Some(name) = current {
-        if let Some(i) = ports.iter().position(|p| p == name) {
-            row.set_selected(i as u32);
+        if name == INTERNAL_OUTPUT_NAME {
+            row.set_selected(0);
+            return;
+        }
+        if let Some(index) = ports.iter().position(|port| port == name) {
+            row.set_selected(index as u32 + 1);
             return;
         }
     }
@@ -143,7 +169,7 @@ const READ_CHUNK_SIZE: usize = 1024 * 1024;
 fn spawn_parse_worker(
     source: ParseSource,
     generation: u64,
-    flag: Arc<AtomicBool>,
+    flag: std::sync::Arc<AtomicBool>,
     tx: std::sync::mpsc::Sender<LoadResult>,
 ) {
     std::thread::spawn(move || {
@@ -182,7 +208,11 @@ fn display_stem(name: &str) -> String {
 // Builder lookups must succeed — a missing widget means the UI template and
 // this code have drifted apart, so panicking is the correct failure mode.
 #[allow(clippy::expect_used)]
-fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
+fn on_activate(
+    app: &adw::Application,
+    engine: Rc<RefCell<MidiEngine>>,
+    lifecycle_rx: Rc<RefCell<Receiver<LifecycleEvent>>>,
+) {
     let builder = gtk::Builder::from_resource("/top/vikasmi/Prelude/window.ui");
 
     let window = get_object!(builder, "window_main", adw::ApplicationWindow);
@@ -208,6 +238,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     gtk::IconTheme::for_display(&display).add_resource_path("/top/vikasmi/Prelude/icons");
 
     let drag_revealer = get_object!(builder, "drag_revealer", gtk::Revealer);
+    let toast_overlay = get_object!(builder, "toast_overlay", adw::ToastOverlay);
     let main_content = get_object!(builder, "main_content", adw::ToolbarView);
     let error_page = get_object!(builder, "error_page", adw::StatusPage);
     let button_error_retry = get_object!(builder, "button_error_retry", gtk::Button);
@@ -246,8 +277,8 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     // back over a std mpsc channel polled from the main loop, so no GTK
     // object ever crosses threads.
     let load_gen = Rc::new(Cell::new(0u64));
-    let load_cancel: Rc<RefCell<Arc<AtomicBool>>> =
-        Rc::new(RefCell::new(Arc::new(AtomicBool::new(false))));
+    let load_cancel: Rc<RefCell<std::sync::Arc<AtomicBool>>> =
+        Rc::new(RefCell::new(std::sync::Arc::new(AtomicBool::new(false))));
 
     // Start loading `input` on a worker thread; returns whether the load was
     // accepted (false only for an unresolvable path). Stops the old song
@@ -289,7 +320,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
             load_cancel.borrow().store(true, Ordering::Relaxed);
             let gen = load_gen.get() + 1;
             load_gen.set(gen);
-            let flag = Arc::new(AtomicBool::new(false));
+            let flag = std::sync::Arc::new(AtomicBool::new(false));
             *load_cancel.borrow_mut() = flag.clone();
 
             engine.borrow_mut().stop();
@@ -322,8 +353,7 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
                             tx,
                         ),
                         Err(e) => {
-                            error_page
-                                .set_description(Some(&format!("Failed to read file: {e}")));
+                            error_page.set_description(Some(&format!("Failed to read file: {e}")));
                             main_stack.set_visible_child_name("error-view");
                         }
                     }
@@ -482,7 +512,9 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         window.add_controller(drop_target);
     }
 
-    // ── Port settings Blueprint dialog (adaptive: floating on desktop, bottom-sheet on mobile) ──
+    // ── Output settings dialog (adaptive: floating on desktop, bottom-sheet on mobile) ──
+    // Built-in is the default. External MIDI ports stay available as an
+    // output route, but there are deliberately no synth parameters here.
     let port_model = gtk::StringList::new(&[]);
     let port_builder = gtk::Builder::from_resource("/top/vikasmi/Prelude/port_settings.ui");
     let port_dialog = get_object!(port_builder, "port_dialog", adw::PreferencesDialog);
@@ -498,16 +530,17 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
     port_row.set_expression(Some(port_expr));
     port_row.set_model(Some(&port_model));
 
+    let updating = Rc::new(Cell::new(false));
+    let builtin_label = format!("Built-in synthesizer ({INTERNAL_OUTPUT_NAME})");
     let populate_ports = clone!(
         #[strong]
         port_model,
         move || {
             let ports = MidiEngine::list_ports();
-            port_model.splice(
-                0,
-                port_model.n_items(),
-                &ports.iter().map(|s| &**s).collect::<Vec<_>>(),
-            );
+            let mut items: Vec<&str> = Vec::with_capacity(ports.len() + 1);
+            items.push(builtin_label.as_str());
+            items.extend(ports.iter().map(String::as_str));
+            port_model.splice(0, port_model.n_items(), &items);
             ports
         },
     );
@@ -533,19 +566,16 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         port_row,
         #[strong]
         window,
+        #[strong]
+        updating,
         move |_, _| {
+            updating.set(true);
             let ports = populate_ports();
-            {
-                let current = engine.borrow();
-                select_port(&port_row, &ports, current.port_name());
-            }
-            let has_ports = !ports.is_empty();
-            port_row.set_sensitive(has_ports);
-            if has_ports {
-                port_row.set_subtitle("");
-            } else {
-                port_row.set_subtitle("No MIDI ports available");
-            }
+            let current = engine.borrow().output_name().map(str::to_string);
+            select_output(&port_row, &ports, current.as_deref());
+            updating.set(false);
+            port_row.set_sensitive(true);
+            port_row.set_subtitle("");
             port_dialog.present(Some(&window));
         },
     ));
@@ -556,11 +586,28 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         engine,
         #[strong]
         port_model,
+        #[strong]
+        toast_overlay,
+        #[strong]
+        updating,
         move |row| {
+            if updating.get() {
+                return;
+            }
             let pos = row.selected();
-            if pos != gtk::INVALID_LIST_POSITION {
-                if let Some(name) = port_model.string(pos) {
-                    let _ = engine.borrow_mut().open_port(name.as_ref());
+            if pos == gtk::INVALID_LIST_POSITION {
+                return;
+            }
+            if pos == 0 {
+                if let Err(error) = engine.borrow_mut().open_synth() {
+                    toast_overlay.add_toast(adw::Toast::new(&format!(
+                        "Built-in audio unavailable: {error}"
+                    )));
+                }
+            } else if let Some(name) = port_model.string(pos) {
+                if let Err(error) = engine.borrow_mut().open_port(name.as_ref()) {
+                    toast_overlay
+                        .add_toast(adw::Toast::new(&format!("Cannot open {name}: {error}")));
                 }
             }
         },
@@ -568,20 +615,21 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
 
     btn_port_refresh.connect_clicked(clone!(
         #[strong]
+        engine,
+        #[strong]
         populate_ports,
         #[strong]
         port_row,
+        #[strong]
+        updating,
         move |_| {
+            updating.set(true);
             let ports = populate_ports();
-            let has_ports = !ports.is_empty();
-            port_row.set_sensitive(has_ports);
-            if has_ports {
-                port_row.set_selected(0);
-                port_row.set_subtitle("");
-            } else {
-                port_row.set_selected(gtk::INVALID_LIST_POSITION);
-                port_row.set_subtitle("No MIDI ports available");
-            }
+            let current = engine.borrow().output_name().map(str::to_string);
+            select_output(&port_row, &ports, current.as_deref());
+            updating.set(false);
+            port_row.set_sensitive(true);
+            port_row.set_subtitle("");
         },
     ));
 
@@ -766,26 +814,12 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         #[strong]
         engine,
         move |_| {
-            engine.borrow_mut().stop();
+            let mut engine = engine.borrow_mut();
+            engine.stop();
+            engine.shutdown_synth();
             glib::Propagation::Proceed
         },
     ));
-
-    // ── Refresh ports and select first one ──
-    {
-        let ports = populate_ports();
-        {
-            let current = engine.borrow();
-            select_port(&port_row, &ports, current.port_name());
-        }
-        let has_ports = !ports.is_empty();
-        port_row.set_sensitive(has_ports);
-        if has_ports {
-            port_row.set_subtitle("");
-        } else {
-            port_row.set_subtitle("No MIDI ports available");
-        }
-    }
 
     // ── Tick loop ──
     start_tick_loop(
@@ -796,11 +830,14 @@ fn on_activate(app: &adw::Application, engine: Rc<RefCell<MidiEngine>>) {
         density_view.clone(),
         label_position.clone(),
         label_length.clone(),
+        toast_overlay.clone(),
+        lifecycle_rx,
     );
 
     window.present();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_tick_loop(
     engine: Rc<RefCell<MidiEngine>>,
     btn_start_stop: gtk::Button,
@@ -809,8 +846,12 @@ fn start_tick_loop(
     density_view: MidiDensityView,
     label_position: gtk::Label,
     label_length: gtk::Label,
+    toast_overlay: adw::ToastOverlay,
+    lifecycle_rx: Rc<RefCell<Receiver<LifecycleEvent>>>,
 ) {
     let was_scale_active = Rc::new(Cell::new(false));
+    let synth_attempted = Rc::new(Cell::new(false));
+    let was_playing = Rc::new(Cell::new(false));
 
     glib::timeout_add_local(
         std::time::Duration::from_millis(TICK_INTERVAL_MS.into()),
@@ -829,7 +870,76 @@ fn start_tick_loop(
             label_position,
             #[strong]
             label_length,
+            #[strong]
+            toast_overlay,
+            #[strong]
+            lifecycle_rx,
+            #[strong]
+            synth_attempted,
+            #[strong]
+            was_playing,
             move || {
+                // ── Start the bundled synth once the SoundFont is available ──
+                // On Android the asset is copied on a Java worker thread, so
+                // this can legitimately be false for the first few ticks.
+                if !engine.borrow().has_output()
+                    && !synth_attempted.get()
+                    && config::soundfont_path().is_ok()
+                {
+                    synth_attempted.set(true);
+                    if let Err(error) = engine.borrow_mut().open_synth() {
+                        toast_overlay.add_toast(adw::Toast::new(&format!(
+                            "Built-in audio unavailable: {error}"
+                        )));
+                    }
+                }
+
+                // ── Synth worker notifications ──
+                loop {
+                    let event = engine.borrow_mut().poll_synth_event();
+                    let Some(event) = event else {
+                        break;
+                    };
+                    match event {
+                        SynthEvent::Ready { .. }
+                        | SynthEvent::AudioSuspended
+                        | SynthEvent::AudioResumed => {}
+                        SynthEvent::Error(error) => {
+                            synth_attempted.set(true);
+                            toast_overlay.add_toast(adw::Toast::new(&format!(
+                                "Audio engine error: {error}"
+                            )));
+                        }
+                    }
+                }
+
+                // ── Android foreground/background bridge ──
+                loop {
+                    let event = lifecycle_rx.borrow_mut().try_recv();
+                    match event {
+                        Ok(LifecycleEvent::SetActive(false)) => {
+                            was_playing.set(engine.borrow().state() == State::Playing);
+                            if was_playing.get() {
+                                engine.borrow_mut().pause();
+                            }
+                            engine.borrow().set_audio_active(false);
+                        }
+                        Ok(LifecycleEvent::SetActive(true)) => {
+                            engine.borrow().set_audio_active(true);
+                            if was_playing.replace(false) {
+                                engine.borrow_mut().play();
+                            }
+                        }
+                        Ok(LifecycleEvent::Shutdown) => {
+                            let mut engine = engine.borrow_mut();
+                            engine.stop();
+                            engine.shutdown_synth();
+                            return glib::ControlFlow::Break;
+                        }
+                        Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                    }
+                }
+
                 // Short borrows only: never hold the engine across MIDI I/O
                 // or widget updates.
                 let state = engine.borrow().state();

@@ -27,3 +27,11 @@ archive instead of `cargo-sources.json`.
 flatpak-builder --user --install-deps-from flathub --force-clean \
   flatpak-build-dir flatpak/top.vikasmi.Prelude.yml
 ```
+
+## Built-in sound
+
+The manifest builds a minimal FluidSynth (PulseAudio output only) and feeds it
+the pinned GeneralUser GS 2.0.3 SF2 as a Flatpak `file` source. `PRELUDE_SF2`
+points Meson's fetch helper at that source file, so the sandbox build needs no
+network access. FluidSynth is built without libsndfile/LADSPA/Signalsmith; the
+app pins the classic FDN reverb engine to match the GUGS recipe.

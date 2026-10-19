@@ -71,6 +71,31 @@ service_out = configure_file(
     install_dir: datadir / 'dbus-1' / 'services',
 )
 
+# Pinned GeneralUser GS SoundFont. Kept out of git; PRELUDE_SF2 lets Nix and
+# Flatpak supply a cached copy without network access.
+soundfont = custom_target(
+    'generaluser-gs',
+    output: 'GeneralUser-GS.sf2',
+    command: [
+        python3,
+        meson.project_source_root() / 'build-aux/fetch_soundfont.py',
+        '--output', '@OUTPUT@',
+        '--source-root', meson.project_source_root(),
+    ],
+    build_by_default: true,
+    install: true,
+    install_dir: pkgdatadir / 'soundfonts',
+    install_tag: 'runtime',
+)
+
+install_data(
+    'licenses/GeneralUser-GS-LICENSE.txt',
+    'licenses/fluidsynth-LGPL-2.1.txt',
+    'licenses/oboe-Apache-2.0.txt',
+    install_dir: pkgdatadir / 'licenses',
+    install_tag: 'runtime',
+)
+
 # Linux-only integration files stay out of Windows/macOS bundles.
 if host_machine.system() == 'linux'
     subdir('icons')

@@ -62,6 +62,18 @@ def main(argv: list[str]) -> int:
     run(["dylibbundler", "-od", "-b", "-x", str(app / "MacOS" / "prelude-bin"),
          "-d", str(app / "Frameworks"), "-p", "@executable_path/../Frameworks"])
     shutil.copy(builddir / "src" / "prelude.gresource", app / "Resources" / "prelude.gresource")
+    soundfont = builddir / "data" / "GeneralUser-GS.sf2"
+    if not soundfont.is_file():
+        print("pack_macos: GeneralUser-GS.sf2 missing (build data target first)",
+              file=sys.stderr)
+        return 1
+    soundfont_dir = app / "Resources" / "soundfonts"
+    soundfont_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(soundfont, soundfont_dir / "GeneralUser-GS.sf2")
+    license_dir = app / "Resources" / "licenses"
+    license_dir.mkdir(parents=True, exist_ok=True)
+    for license_file in sorted((src / "data" / "licenses").glob("*.txt")):
+        shutil.copy(license_file, license_dir / license_file.name)
     schemas = sorted((builddir / "data").glob("*.gschema.xml"))
     shutil.copy(schemas[0] if schemas else
                 src / "data" / "top.vikasmi.Prelude.gschema.xml",

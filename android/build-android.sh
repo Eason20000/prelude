@@ -28,7 +28,7 @@ else
 fi
 
 # --- tool checks -----------------------------------------------------------
-for tool in perl "$MESON_BIN" cargo java adb keytool; do
+for tool in perl "$MESON_BIN" cargo java adb keytool cmake ninja unzip; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "build-android: missing tool: $tool (source ./env.sh + toolchain shell first)" >&2
         exit 1
@@ -131,6 +131,9 @@ done
     exit 1
 }
 
+# --- FluidSynth + Oboe runtime (after .pc staging: FluidSynth needs glib) ---
+./build-fluidsynth.sh
+
 perl "$PIXIEWOOD_DIR/pixiewood" build
 
 # --- sign release (debug keystore; publishing keys are future work) ---------
@@ -173,4 +176,42 @@ grep -q 'android:name="top.vikasmi.prelude.PreludeActivity"' \
     echo "build-android: badging check failed for $APK_PATH" >&2
     exit 1
 }
+
+# FluidSynth/Oboe/libc++ and the SoundFont are mandatory. A missing entry is
+# a silent "no sound" bug at runtime, so fail the build instead.
+for lib in libfluidsynth.so liboboe.so libc++_shared.so; do
+    unzip -l "$APK_PATH" | grep -q "lib/arm64-v8a/$lib" || {
+        echo "build-android: APK is missing lib/arm64-v8a/$lib" >&2
+        exit 1
+    }
+done
+unzip -l "$APK_PATH" \
+    | grep -q 'assets/share/prelude/soundfonts/GeneralUser-GS.sf2' || {
+    echo "build-android: APK is missing the GeneralUser GS asset" >&2
+    exit 1
+}
+unzip -l "$APK_PATH" \
+    | grep -q 'assets/share/prelude/licenses/GeneralUser-GS-LICENSE.txt' || {
+    echo "build-android: APK is missing the GUGS license" >&2
+    exit 1
+}
+
+# Android 15+ 16 KB page compatibility: both the zip alignment and every
+# packaged ELF LOAD segment must be 16 KB aligned.
+"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$APK_PATH" || {
+    echo "build-android: APK is not 16 KB zip-aligned" >&2
+    exit 1
+}
+TMP_ALIGN=$(mktemp -d)
+trap 'rm -rf "$TMP_ALIGN"' EXIT
+READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+for lib in libfluidsynth.so liboboe.so libc++_shared.so libprelude.so; do
+    unzip -p "$APK_PATH" "lib/arm64-v8a/$lib" > "$TMP_ALIGN/$lib"
+    if "$READELF" -lW "$TMP_ALIGN/$lib" \
+        | awk '$1 == "LOAD" { print $NF }' | grep -qv '0x4000'; then
+        echo "build-android: $lib is not 16 KB ELF-aligned" >&2
+        exit 1
+    fi
+done
+
 echo "build-android: OK -> $APK_PATH ($(du -h "$APK_PATH" | cut -f1))"

@@ -3,7 +3,7 @@
 ## Quick start
 
 ```bash
-# dev shell (includes Rust + gtk4 + libadwaita + alsa-lib + blueprint-compiler)
+# dev shell (includes Rust + gtk4 + libadwaita + alsa-lib + fluidsynth + blueprint-compiler)
 nix develop
 
 # build & run (the canonical build gate, see Developer commands)
@@ -13,6 +13,7 @@ nix build && nix run .
 ## Architecture
 
 - Single crate at repo root (no workspace).
+
 - `android/` is the Android platform shell (same Rust core as staticlib + C
   entry + Pixiewood packaging, see its README): single repo because core and
   shell share one language and one release train — don't split into a second
@@ -22,8 +23,10 @@ nix build && nix run .
   Pixiewood-consumed `android/data` metainfo, and CI `android.yml` runs on
   `android/**`, `src/**`, `ui/**`, `Cargo.*` changes (release builds all
   platforms via `workflow_call`).
+
 - `src/main.rs` creates an `adw::Application` with app-id `top.vikasmi.Prelude`,
   runs `application::PreludeApplication`.
+
 - `src/application.rs` owns all GTK widget wiring — reads `ui/window.blp` and
   `ui/port_settings.blp` (both compiled to GtkBuilder XML by Meson into the
   installed `prelude.gresource` bundle, loaded at runtime via
@@ -36,20 +39,38 @@ nix build && nix run .
   generation-guarded so stale loads/cancels are discarded). Runs a
   `glib::timeout_add_local` tick loop every 20 ms. Scale seeks are **deferred to
   release** (`was_scale_active` flag): don't seek on every `change-value` while
-  dragging — it spams `all_notes_off`. Port settings are an adaptive
+  dragging — it spams `all_notes_off`. Output settings are an adaptive
   `Adw.PreferencesDialog` (`ui/port_settings.blp` → `Adw.ComboRow` +
-  `StringList` injected via `PropertyExpression(StringObject:string)`) presented
-  via `AdwDialogExt::present()`, floating on desktop / bottom-sheet on mobile.
-- `src/engine.rs` parses MIDI via `midly`, sends events via `midir`; handles
-  play/pause/stop/seek/port management. `parse_file` is a pure `Send` function
-  for the background loader thread (cooperative cancellation via `AtomicBool`
-  polling points; `midly::Smf::parse` itself is not interruptible) and
-  `apply_loaded` swaps the result in on the main thread. `play()` re-anchors
+  `StringList` injected via `PropertyExpression(StringObject:string)`): the
+  first row is the bundled FluidSynth (default), the rest are external MIDI
+  ports. Presented via `AdwDialogExt::present()`, floating on desktop /
+  bottom-sheet on mobile. The same 20 ms loop polls the synth worker and the
+  Android lifecycle channel; there is no synthesis-parameter UI.
+
+- `src/engine.rs` parses MIDI via `midly` and sends events to either an external
+  `midir` port or the bundled FluidSynth (`src/synth.rs`); handles
+  play/pause/stop/seek/output management. `src/platform.rs` owns only the per-OS
+  audio-driver candidate list and the mobile voice cap; `src/synth.rs` owns all
+  FluidSynth FFI and settings on a dedicated worker thread. Both outputs share
+  one event stream and transport. `parse_file` is a pure `Send` function for the
+  background loader thread (cooperative cancellation via `AtomicBool` polling
+  points; `midly::Smf::parse` itself is not interruptible) and `apply_loaded`
+  swaps the result in on the main thread. `play()` re-anchors
   `start = now - elapsed` for both Paused and Stopped (the old pause-duration
   compensation was deliberately removed — don't restore it). SMPTE/timecode
   files are rejected at load with an error. At load it also builds a measure map
   (tempo + time signature aware) and note intervals, exposed via `measures()` /
   `notes()` for the page-turn view.
+
+- `src/synth.rs` starts a `prelude-synth` worker owning `fluid_settings_t`,
+  `fluid_synth_t` and `fluid_audio_driver_t`; the UI only holds an mpsc sender,
+  so the 30 MB GeneralUser GS load never blocks GTK. Settings are the GUGS
+  upstream recipe (device-id 16, gain 0.5, polyphony 512 desktop / 256 mobile,
+  FDN reverb, GUGS chorus values) and are never exposed in UI. FluidSynth 2.6+
+  is pinned to `synth.reverb.engine=fdn` because 2.6 changed the default to
+  Dattorro while GUGS was tuned on FDN. The worker is suspended by deleting and
+  recreating the audio driver (Android background, optional idle).
+
 - `src/page_view.rs` is a second custom `GtkWidget` subclass
   (`PreludePageTurnView`) — the P5 "kashiwade" page-turn visual. Dual-view
   layout in `view_root` (top to bottom): file title `Label label_name` (top-left
@@ -80,6 +101,7 @@ nix build && nix run .
     GROWTH/SHRINK scheme.)
   - Seek/jump clears the previous-page cache (no transition). Same accent redraw
     wiring as `midi_view.rs` (accent notify handler held in `imp`).
+
 - `src/midi_view.rs` is a custom `GtkWidget` subclass (`PreludeMidiDensityView`)
   rendered via `WidgetImpl::snapshot` (GtkSnapshot → GPU-accelerated render
   nodes, `CONTENT_HEIGHT` halved to `48` for the strip); drag-to-scrub via
@@ -97,12 +119,15 @@ nix build && nix run .
     `@implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget`, and
     `WidgetImpl::measure` returns
     `(min, natural, min_baseline, natural_baseline)`.
+
 - `ui/window.blp` and `ui/port_settings.blp` (Blueprint) are the two UI
   definition files — `view_root` now declares `label_name` +
   `page/density_placeholder` parents via `append`, not `remove`/`prepend`.
   Change either → Meson recompiles on the next build (root `meson.build` →
   build-root `*.ui` → `src/prelude.gresource.xml` bundle in `pkgdatadir`, loaded
-  at runtime; there is no `build.rs`).
+  at runtime). `build.rs` exists only to probe `fluidsynth` via pkg-config for
+  Cargo; it never generates UI resources.
+
 - Meson is the primary build system, Nix only wraps it: root `meson.build`
   compiles each `.blp` to the build root (one explicit single-output target per
   file, no `batch-compile`), `src/meson.build` bundles them via
@@ -125,18 +150,23 @@ nix build && nix run .
   spellings (local = Nix checkPhase = CI); `meson compile pack-windows` /
   `pack-linux` / `pack-macos` assemble the release artifacts via
   `build-aux/pack_*.py` (CI only uploads); `meson dist` embeds `vendor/` via
-  `build-aux/dist-vendor.sh`. `packaging/macos/Info.plist.in` is substituted by
-  Meson — never hand-bump it with `Cargo.toml`.
+  `build-aux/dist-vendor.sh`. `data/meson.build` also installs the pinned
+  GeneralUser GS SF2 (`build-aux/fetch_soundfont.py`, `PRELUDE_SF2` override for
+  Nix/Flatpak) and license texts. `packaging/macos/Info.plist.in` is substituted
+  by Meson — never hand-bump it with `Cargo.toml`.
 
 ## Dependencies (non-obvious)
 
-| Dep           | Version                | Notes                                                |
-| ------------- | ---------------------- | ---------------------------------------------------- |
-| `gtk4`        | `=0.11.3` feat `v4_14` | exact pin                                            |
-| `libadwaita`  | `=0.9.1` feat `v1_8`   | exact pin                                            |
-| `graphene-rs` | `0.22`                 | `graphene::Rect` for `Snapshot::append_color`        |
-| `midly`       | `0.5`                  | MIDI file parser                                     |
-| `midir`       | `0.11`                 | MIDI output; requires `alsa-lib` at runtime on Linux |
+| Dep            | Version                | Notes                                                |
+| -------------- | ---------------------- | ---------------------------------------------------- |
+| `gtk4`         | `=0.11.3` feat `v4_14` | exact pin                                            |
+| `libadwaita`   | `=0.9.1` feat `v1_8`   | exact pin                                            |
+| `graphene-rs`  | `0.22`                 | `graphene::Rect` for `Snapshot::append_color`        |
+| `midly`        | `0.5`                  | MIDI file parser                                     |
+| `midir`        | `0.11`                 | MIDI output; requires `alsa-lib` at runtime on Linux |
+| `fluidsynth`   | `>=2.4` (system)       | C synth library; `build.rs` probes it via pkg-config |
+| `pkg-config`   | `0.3` (build dep)      | link flags for libfluidsynth                         |
+| GeneralUser GS | `2.0.3` (pinned hash)  | SF2 downloaded at build time, not committed          |
 
 ## Developer commands
 
@@ -146,7 +176,7 @@ nix build && nix run .
 | `nix flake check`                                   | verifies flake evaluation + formatting                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `nix fmt`                                           | format all tracked sources via treefmt-nix (Nix/Rust/TOML/Markdown/Blueprint/Meson/YAML/XML+SVG/CSS; `*.lock` and LICENSE excluded; yamlfmt folds the MSYS2 package list by design)                                                                                                                                                                                                                                                                                                                                             |
 | `nix develop`                                       | dev shell with `cargo build` / `cargo clippy` / `cargo generate-lockfile`, plus `meson`/`blueprint-compiler` for setup+install to a prefix; plain `cargo build` still compiles but the binary needs installed resources to open a window                                                                                                                                                                                                                                                                                        |
-| `meson setup builddir && meson compile -C builddir` | non-Nix builds (MSYS2 MinGW / native Linux): needs `cargo`, `blueprint-compiler`, gtk4 + libadwaita + alsa-lib visible; install with `meson install -C builddir`                                                                                                                                                                                                                                                                                                                                                                |
+| `meson setup builddir && meson compile -C builddir` | non-Nix builds (MSYS2 MinGW / native Linux): needs `cargo`, `blueprint-compiler`, gtk4 + libadwaita + alsa-lib + fluidsynth visible; install with `meson install -C builddir`                                                                                                                                                                                                                                                                                                                                                   |
 
 There are no tests — no test directory, no test dependencies. Do not add testing
 infrastructure unless explicitly asked.
@@ -211,9 +241,10 @@ parser changes. `README.md` intentionally has no roadmap.
 - **UI templates load at runtime, nothing is embedded**: `ui/*.blp` → Meson
   custom targets → GtkBuilder XML → `prelude.gresource` bundle installed to
   `pkgdatadir`; `main` registers it before activate and exits nonzero with a
-  stderr message when absent. There is no `build.rs`; the generated `.ui` is
-  never committed. `blueprint-compiler` must be in `nativeBuildInputs` (package)
-  / devShell.
+  stderr message when absent. `build.rs` only probes libfluidsynth via
+  pkg-config; the generated `.ui` is never committed. `blueprint-compiler` and
+  `fluidsynth` must be visible at build time
+  (`nativeBuildInputs`/`buildInputs`).
 - **CI builds all three platforms, runs no tests** —
   `.github/workflows/build.yml` (Windows MSYS2-UCRT64 / Ubuntu 26.04 / macOS 14)
   configures via Meson with `--buildtype=release` and runs
@@ -234,6 +265,14 @@ parser changes. `README.md` intentionally has no roadmap.
   template instantiated at launch. `packaging/macos/Info.plist.in` version keys
   are substituted by Meson from `Cargo.toml` — never hand-bump them. Theme icons
   ship inside all three artifacts (bundled Adwaita).
+- **Built-in synthesis**: `src/synth.rs` is the only FluidSynth code path on
+  desktop and Android. `src/platform.rs` may choose driver names and the mobile
+  voice cap; do not fork event mapping or GUGS settings per platform. Android
+  materializes the APK SoundFont asset to `filesDir` and passes the path through
+  JNI, so `fluid_synth_sfload(path)` is identical everywhere.
+  `android/build-fluidsynth.sh` cross-compiles FluidSynth 2.6.1 + Oboe; the
+  runtime `.so` files are copied into Pixiewood's `jniLibs` root by
+  `android/copy_android_libs.py` and the APK is checked for 16 KB alignment.
 - **App is GPL-3.0-only**; license must be preserved on reuse.
-- Target environment: **Linux** with a running ALSA sequencer or hardware MIDI
-  port.
+- Target environment: **Linux** with an audio output. The bundled synth needs no
+  ALSA sequencer; external MIDI output still requires one (or a hardware port).

@@ -26,6 +26,9 @@ graphene = { package = "graphene-rs", version = "0.22" }
 midly = "0.5"
 midir = "0.11"
 
+[build-dependencies]
+pkg-config = "0.3"
+
 # Android-only: initialize ndk-context from PreludeActivity (see
 # prelude_android_init_midi in src/lib.rs). Pinned to the same 0.1 line
 # midir uses so Cargo unifies both on one global instance (verify with

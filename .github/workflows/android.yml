@@ -71,7 +71,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y \
             perl libglib-perl libglib-object-introspection-perl libipc-run-perl \
             libjson-perl libset-scalar-perl libxml-libxml-perl libxml-libxslt-perl \
-            build-essential pkg-config glslc gobject-introspection gir1.2-appstream \
+            build-essential pkg-config cmake ninja-build glslc gobject-introspection gir1.2-appstream \
             gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-dev-bin libglib2.0-dev libxml2-utils sassc git gettext \
             desktop-file-utils apksigner blueprint-compiler
       - name: Setup Android SDK

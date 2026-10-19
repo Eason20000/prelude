@@ -5,8 +5,10 @@
 //! `meson.build`); a plain `cargo build` falls back to the defaults below
 //! (which match a default `meson install` with no `--prefix`).
 
-#[cfg(not(target_os = "android"))]
 use std::path::PathBuf;
+
+#[cfg(target_os = "android")]
+use std::sync::OnceLock;
 
 const APP_ID_ENV: Option<&str> = option_env!("APP_ID");
 // Desktop-only: Android embeds the bundle (see `EMBEDDED_GRESOURCE` in
@@ -85,4 +87,67 @@ pub(crate) fn gresource_path() -> PathBuf {
         .into_iter()
         .find(|p| p.is_file())
         .unwrap_or_else(|| PathBuf::from(pkgdatadir()).join(FILE))
+}
+
+/// Bundled GeneralUser GS SoundFont.
+///
+/// Desktop looks next to the executable and in pkgdatadir (same portable-tree
+/// strategy as the GResource bundle). Android materializes the APK asset to
+/// app-private storage and hands the path to Rust through JNI, so the synth
+/// worker still receives a normal filesystem path on every platform.
+pub(crate) fn soundfont_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        // Once Java has handed us a path, let FluidSynth try it even if the
+        // file is missing: that produces a real load error/toast instead of
+        // waiting forever for a copy that failed.
+        return ANDROID_SOUNDFONT
+            .get()
+            .cloned()
+            .ok_or_else(|| "The built-in instrument is still being prepared".to_string());
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        const FILE: &str = "soundfonts/GeneralUser-GS.sf2";
+
+        if let Ok(path) = std::env::var("PRELUDE_SF2") {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("../share/prelude").join(FILE));
+                candidates.push(dir.join("../Resources").join(FILE));
+                candidates.push(dir.join(FILE));
+            }
+        }
+        candidates.push(PathBuf::from(pkgdatadir()).join(FILE));
+
+        candidates
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or_else(|| "Bundled GeneralUser GS SoundFont is missing".to_string())
+    }
+}
+
+#[cfg(target_os = "android")]
+static ANDROID_SOUNDFONT: OnceLock<PathBuf> = OnceLock::new();
+
+/// Called from `PreludeActivity` after the APK asset has been copied to
+/// app-private storage. Empty means "preparation failed"; the synth worker
+/// will surface a normal load error instead of silently staying muted.
+#[cfg(target_os = "android")]
+pub(crate) fn set_android_soundfont_path(path: PathBuf) {
+    if let Some(existing) = ANDROID_SOUNDFONT.get() {
+        if existing != &path {
+            eprintln!("prelude: Android SoundFont path changed; keeping the first");
+        }
+        return;
+    }
+    let _ = ANDROID_SOUNDFONT.set(path);
 }

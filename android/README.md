@@ -22,7 +22,8 @@ Android-specific lives in this directory.
 
 - JDK 17, Android SDK (cmdline-tools, platform-36, build-tools 36.0.0), NDK
   27.2.12479018, Rust stable + `aarch64-linux-android` target.
-- Pixiewood checkout + Meson >= 1.9 (we use 1.12.1) + blueprint-compiler.
+- Pixiewood checkout + Meson >= 1.9 (we use 1.12.1) + blueprint-compiler + cmake
+  \+ ninja (FluidSynth and Oboe are CMake projects).
 - NixOS: enter the toolchain shell first (one-liner below); plain Linux:
   `apt install` the equivalents (openjdk-17-jdk, perl + Glib/XML/JSON/Set
   modules, meson, ninja, pkg-config, sassc, glslc, gcc, glib dev tools,
@@ -36,7 +37,7 @@ nix shell --impure nixpkgs#steam-run nixpkgs#perl \
   nixpkgs#perlPackages.IPCRun nixpkgs#perlPackages.JSON \
   nixpkgs#perlPackages.SetScalar nixpkgs#perlPackages.XMLLibXML \
   nixpkgs#perlPackages.XMLLibXSLT nixpkgs#meson nixpkgs#ninja \
-  nixpkgs#pkg-config nixpkgs#sassc nixpkgs#shaderc nixpkgs#gcc nixpkgs#glib \
+  nixpkgs#pkg-config nixpkgs#cmake nixpkgs#ninja nixpkgs#sassc nixpkgs#shaderc nixpkgs#gcc nixpkgs#glib \
   nixpkgs#glib.dev nixpkgs#libxml2 nixpkgs#python3 nixpkgs#git \
   nixpkgs#blueprint-compiler nixpkgs#appstream \
   nixpkgs#gobject-introspection nixpkgs#openjdk17_headless \
@@ -48,7 +49,7 @@ nix shell --impure nixpkgs#steam-run nixpkgs#perl \
 ```bash
 cd android
 source ./env.sh
-./build-android.sh            # generate → patch → build → verify (debug APK)
+./build-android.sh            # prepare → stage → FluidSynth+Oboe → build → verify
 adb install -r .pixiewood/android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
@@ -79,6 +80,15 @@ alongside the desktop ones.
   (no `touch` hack).
 - `src://` metainfo includes need the freedesktop `xmlns` + a `<releases>` entry
   or `generate` dies.
+- `build-fluidsynth.sh` caches FluidSynth/Oboe under the sysroot; `--force`
+  rebuilds. It installs `libfluidsynth.so`, `liboboe.so`, `libc++_shared.so` and
+  the target `fluidsynth.pc`; `copy_android_libs.py` puts the runtime libs next
+  to `libprelude.so` for Pixiewood's `jniLibs` symlink.
+- The GUGS SF2 is installed as a normal data file; Pixiewood copies it into APK
+  assets and `PreludeActivity` materializes it in `filesDir`. Rust then uses the
+  same path-based `fluid_synth_sfload()` as desktop.
+- Android 15+ requires 16 KB-compatible native code; `build-android.sh` checks
+  both ELF LOAD alignment and APK zip alignment.
 - The GDK content backend crashes on unattached threads; keep opens on the main
   thread (see `ParseSource`).
 - Cargo's `.pc` files come straight from the build tree

@@ -80,6 +80,18 @@ def main(argv: list[str]) -> int:
 
     env = dict(os.environ)
     env["CARGO_TARGET_DIR"] = args.target_dir
+    if args.mode == "lib":
+        # Keep pkg-config from resolving host libraries when the desktop dev
+        # shell also has a fluidsynth/GTK installation. PKG_CONFIG_LIBDIR
+        # replaces the default search path; PKG_CONFIG_PATH alone only
+        # prepends. Never export this globally: pixiewood prepare resolves
+        # build-machine tools through the host pkg-config.
+        sysroot = env.get("PRELUDE_ANDROID_SYSROOT")
+        if sysroot:
+            abi_dir = "arm64-v8a" if "aarch64" in args.triple else "x86_64"
+            env["PKG_CONFIG_LIBDIR"] = os.path.join(
+                sysroot, "lib", abi_dir, "pkgconfig")
+            env["PKG_CONFIG_ALLOW_CROSS"] = "1"
     cmd = build_argv(args)
     print(f"cargo_build.py: {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, env=env, check=True)

@@ -65,10 +65,10 @@ jobs:
           "CARGO_INCREMENTAL=0" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils appstream gettext
+        run: sudo apt-get update && sudo apt-get install -y pkgconf meson ninja-build libgtk-4-dev libadwaita-1-dev libfluidsynth-dev blueprint-compiler gobject-introspection libasound2-dev librsvg2-bin librsvg2-dev desktop-file-utils appstream gettext
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install gtk4 libadwaita adwaita-icon-theme meson pkgconf blueprint-compiler dylibbundler
+        run: brew install gtk4 libadwaita adwaita-icon-theme meson pkgconf blueprint-compiler dylibbundler fluid-synth
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -76,7 +76,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust             mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust             mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-fluidsynth mingw-w64-ucrt-x86_64-adwaita-icon-theme mingw-w64-ucrt-x86_64-blueprint-compiler mingw-w64-ucrt-x86_64-librsvg
       - name: Meson setup (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}

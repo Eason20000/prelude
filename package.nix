@@ -20,10 +20,16 @@
   gtk4,
   libadwaita,
   alsa-lib,
+  fluidsynth,
+  fetchurl,
 }:
 
 let
   cargoToml = lib.importTOML (self + "/Cargo.toml");
+  generalUserGs = fetchurl {
+    url = "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60/GeneralUser-GS.sf2";
+    sha256 = "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe";
+  };
 in
 stdenv.mkDerivation {
   pname = cargoToml.package.name;
@@ -35,7 +41,7 @@ stdenv.mkDerivation {
     inherit (cargoToml.package) version;
     pname = cargoToml.package.name;
     src = self;
-    hash = "sha256-nySMsrGs3f3UDL+6FsQ05515NGQS9VPOkM+NFiciD1s=";
+    hash = "sha256-GHCboCXL+ZyrCrVR0ivNWCkab18A+zGtZMj4ZL5iAws=";
   };
 
   nativeBuildInputs = [
@@ -59,7 +65,12 @@ stdenv.mkDerivation {
     gtk4
     libadwaita
     alsa-lib
+    fluidsynth
   ];
+
+  preBuild = ''
+    export PRELUDE_SF2=${generalUserGs}
+  '';
 
   doCheck = true;
 

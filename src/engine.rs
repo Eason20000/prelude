@@ -1,10 +1,16 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use midir::{MidiOutput, MidiOutputConnection};
 use midly::{MetaMessage, MidiMessage, Timing, TrackEventKind};
 
+use crate::config;
+use crate::platform;
+use crate::synth::{self, SynthCommand, SynthEvent, SynthHandle};
+
 const MIDI_CLIENT_NAME: &str = "prelude";
+pub(crate) const INTERNAL_OUTPUT_NAME: &str = "GeneralUser GS";
 
 /// A MIDI event that can be sent to a port.
 #[derive(Debug, Clone)]
@@ -82,6 +88,10 @@ pub(crate) struct MidiEngine {
     next_idx: usize,
     port: Option<MidiOutputConnection>,
     port_name: Option<String>,
+    synth: Option<SynthHandle>,
+    synth_events: Option<Receiver<SynthEvent>>,
+    synth_ready: bool,
+    pending_play: bool,
     start: Option<Instant>,
     state: State,
     paused_since: Option<Instant>,
@@ -99,6 +109,10 @@ impl MidiEngine {
             next_idx: 0,
             port: None,
             port_name: None,
+            synth: None,
+            synth_events: None,
+            synth_ready: false,
+            pending_play: false,
             start: None,
             state: State::Stopped,
             paused_since: None,
@@ -194,11 +208,21 @@ impl MidiEngine {
         self.elapsed = 0.0;
         self.start = None;
         self.paused_since = None;
+        self.pending_play = false;
         self.state = State::Stopped;
+        self.reset_output();
     }
 
     pub(crate) fn play(&mut self) {
         if self.events.is_empty() || self.state == State::Playing {
+            return;
+        }
+
+        // The built-in engine loads its SoundFont off the UI thread. Defer
+        // playback until it reports ready instead of dropping the burst of
+        // events that would otherwise hit an uninitialized synth.
+        if self.synth.is_some() && !self.synth_ready {
+            self.pending_play = true;
             return;
         }
 
@@ -248,8 +272,10 @@ impl MidiEngine {
         self.paused_since = None;
         self.elapsed = 0.0;
         self.next_idx = 0;
+        self.pending_play = false;
         self.state = State::Stopped;
         self.all_notes_off();
+        self.reset_output();
     }
 
     pub(crate) fn seek(&mut self, position: f64) {
@@ -260,6 +286,7 @@ impl MidiEngine {
         let position = position.clamp(0.0, self.total_length);
         self.all_notes_off();
 
+        self.pending_play = false;
         self.paused_since = None;
         self.elapsed = position;
         self.next_idx = self.events.partition_point(|(t, _)| *t < position);
@@ -394,7 +421,40 @@ impl MidiEngine {
         .unwrap_or_default()
     }
 
+    /// Start the bundled FluidSynth backend. The worker loads the SoundFont
+    /// and opens the audio device asynchronously; `poll_synth_event` reports
+    /// readiness and errors.
+    pub(crate) fn open_synth(&mut self) -> Result<(), String> {
+        let soundfont = config::soundfont_path()?;
+        let was_playing = self.state == State::Playing;
+        self.all_notes_off();
+        if was_playing {
+            self.pause();
+        }
+
+        self.port = None;
+        self.port_name = None;
+        self.synth = None;
+        self.synth_events = None;
+        self.synth_ready = false;
+        self.pending_play = false;
+
+        let (handle, events) = synth::spawn(soundfont, platform::default_polyphony())?;
+        self.synth = Some(handle);
+        self.synth_events = Some(events);
+        if was_playing {
+            self.pending_play = true;
+        }
+        Ok(())
+    }
+
     pub(crate) fn open_port(&mut self, name: &str) -> Result<(), String> {
+        self.all_notes_off();
+        // Dropping the synth sender shuts its worker (and audio driver) down.
+        self.synth = None;
+        self.synth_events = None;
+        self.synth_ready = false;
+        self.pending_play = false;
         self.port = None;
 
         let midi = match std::panic::catch_unwind(|| MidiOutput::new(MIDI_CLIENT_NAME)) {
@@ -425,12 +485,87 @@ impl MidiEngine {
         Ok(())
     }
 
-    pub(crate) fn port_name(&self) -> Option<&str> {
-        self.port_name.as_deref()
+    pub(crate) fn output_name(&self) -> Option<&str> {
+        if self.synth.is_some() {
+            Some(INTERNAL_OUTPUT_NAME)
+        } else {
+            self.port_name.as_deref()
+        }
     }
 
-    /// Send a single event through the port if connected.
+    pub(crate) fn has_output(&self) -> bool {
+        self.synth.is_some() || self.port.is_some()
+    }
+
+    /// Poll the synth worker from the GTK loop. Ready/Error are applied here
+    /// so every caller observes the same transport state.
+    pub(crate) fn poll_synth_event(&mut self) -> Option<SynthEvent> {
+        let receiver = self.synth_events.take()?;
+        let event = match receiver.try_recv() {
+            Ok(event) => {
+                self.synth_events = Some(receiver);
+                event
+            }
+            Err(TryRecvError::Empty) => {
+                self.synth_events = Some(receiver);
+                return None;
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.synth = None;
+                self.synth_ready = false;
+                self.pending_play = false;
+                return Some(SynthEvent::Error(
+                    "The built-in audio engine stopped".to_string(),
+                ));
+            }
+        };
+
+        match &event {
+            SynthEvent::Ready { version } => {
+                eprintln!("prelude: FluidSynth {version} ready");
+                self.synth_ready = true;
+                if self.pending_play {
+                    self.pending_play = false;
+                    self.play();
+                }
+            }
+            SynthEvent::Error(_) => {
+                self.synth_ready = false;
+                self.pending_play = false;
+            }
+            SynthEvent::AudioSuspended | SynthEvent::AudioResumed => {}
+        }
+
+        Some(event)
+    }
+
+    pub(crate) fn set_audio_active(&self, active: bool) {
+        if let Some(synth) = &self.synth {
+            synth.send(if active {
+                SynthCommand::ResumeAudio
+            } else {
+                SynthCommand::SuspendAudio
+            });
+        }
+    }
+
+    pub(crate) fn shutdown_synth(&mut self) {
+        if let Some(synth) = self.synth.take() {
+            synth.send(SynthCommand::Shutdown);
+        }
+        self.synth_events = None;
+        self.synth_ready = false;
+        self.pending_play = false;
+    }
+
+    /// Send a single event through the active output.
     pub(crate) fn send_event(&mut self, ev: &MidiEvent) {
+        if let Some(synth) = &self.synth {
+            if self.synth_ready {
+                synth.send(SynthCommand::Event(ev.clone()));
+            }
+            return;
+        }
         if let Some(ref mut port) = self.port {
             let bytes = encode_event(ev);
             if let Err(e) = port.send(&bytes) {
@@ -442,8 +577,8 @@ impl MidiEngine {
     // ── Internal ────────────────────────────────────────────────
 
     fn all_notes_off(&mut self) {
-        if self.port.is_none() {
-            return;
+        if let Some(synth) = &self.synth {
+            synth.send(SynthCommand::AllNotesOff);
         }
         if let Some(ref mut port) = self.port {
             for ch in 0..16u8 {
@@ -453,6 +588,12 @@ impl MidiEngine {
                     }
                 }
             }
+        }
+    }
+
+    fn reset_output(&self) {
+        if let Some(synth) = &self.synth {
+            synth.send(SynthCommand::Reset);
         }
     }
 

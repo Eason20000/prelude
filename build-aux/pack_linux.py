@@ -76,6 +76,18 @@ def main(argv: list[str]) -> int:
     shutil.copy(src / "packaging" / "appimage" / "AppRun", appdir / "AppRun")
     shutil.copy(builddir / "src" / "prelude.gresource",
                 appdir / "usr" / "share" / "prelude" / "prelude.gresource")
+    soundfont = builddir / "data" / "GeneralUser-GS.sf2"
+    if not soundfont.is_file():
+        print("pack_linux: GeneralUser-GS.sf2 missing (build data target first)",
+              file=sys.stderr)
+        return 1
+    soundfont_dir = appdir / "usr" / "share" / "prelude" / "soundfonts"
+    soundfont_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(soundfont, soundfont_dir / "GeneralUser-GS.sf2")
+    license_dir = appdir / "usr" / "share" / "prelude" / "licenses"
+    license_dir.mkdir(parents=True, exist_ok=True)
+    for license_file in sorted((src / "data" / "licenses").glob("*.txt")):
+        shutil.copy(license_file, license_dir / license_file.name)
     schemas = sorted((builddir / "data").glob("*.gschema.xml"))
     if not schemas:
         print("pack_linux: no .gschema.xml in builddir/data", file=sys.stderr)

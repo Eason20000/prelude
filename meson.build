@@ -10,6 +10,10 @@ i18n = import('i18n')
 
 dependency('gtk4', version: '>= 4.14')
 dependency('libadwaita-1', version: '>= 1.8')
+# Conservative floor: GeneralUser GS recommends 2.3+, 2.4 fixes the default
+# effects and several SoundFont rendering bugs. Cargo's build.rs probes the
+# same module for the actual link flags.
+dependency('fluidsynth', version: '>= 2.4')
 
 cargo = find_program('cargo', required: true)
 python3 = find_program('python3', required: true)
@@ -186,7 +190,7 @@ version_suffix = get_option('version_suffix')
 pack_windows = custom_target(
     'pack-windows',
     input: [desktop_out, metainfo_out, gschema_out],
-    depends: [cargo_bin, resources],
+    depends: [cargo_bin, resources, soundfont],
     build_by_default: false,
     console: true,
     output: 'prelude@0@-windows-x64.zip'.format(version_suffix),
@@ -205,7 +209,7 @@ pack_windows = custom_target(
 pack_linux = custom_target(
     'pack-linux',
     input: [desktop_out, metainfo_out, gschema_out],
-    depends: [cargo_bin, resources],
+    depends: [cargo_bin, resources, soundfont],
     build_by_default: false,
     console: true,
     output: 'Prelude@0@-linux-x64.AppImage'.format(version_suffix),
@@ -221,7 +225,7 @@ pack_linux = custom_target(
 pack_macos = custom_target(
     'pack-macos',
     input: [desktop_out, metainfo_out, gschema_out],
-    depends: [cargo_bin, resources],
+    depends: [cargo_bin, resources, soundfont],
     build_by_default: false,
     console: true,
     output: 'Prelude@0@-macos-arm64.dmg'.format(version_suffix),

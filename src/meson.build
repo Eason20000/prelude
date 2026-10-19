@@ -35,6 +35,7 @@ endif
 cargo_inputs = files(
     '../Cargo.lock',
     '../Cargo.toml',
+    '../build.rs',
     'application.rs',
     'config.rs',
     'engine.rs',
@@ -42,6 +43,8 @@ cargo_inputs = files(
     'main.rs',
     'midi_view.rs',
     'page_view.rs',
+    'platform.rs',
+    'synth.rs',
 )
 
 # Cargo appends .exe to binaries on Windows hosts. Meson decides the suffix

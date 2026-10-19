@@ -10,7 +10,8 @@ nix run .
 ```
 
 Open a MIDI file via the file dialog, then control playback with the on-screen
-buttons or the space bar.
+buttons or the space bar. Playback uses the bundled GeneralUser GS SoundFont by
+default; an external MIDI port can be selected in Output Settings.
 
 ## Development
 

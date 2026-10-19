@@ -459,5 +459,79 @@ deferred polish.
   USB needs none via the MIDI service.
 - **Release build**: Gradle release type, signing key management, APK size
   (debug is ~400MB unstripped), `@Keep`/ProGuard rules for the JNI bridge.
-- **Lifecycle**: pause/resume/rotation and background behavior are unexercised
-  on device; the 20ms tick loop has no mobile power policy.
+- **Lifecycle**: pause/resume/rotation and background behavior are implemented
+  via the JNI lifecycle channel (see G6) but still need real-device testing.
+
+---
+
+## G. Built-in FluidSynth
+
+### G1. Re-evaluate the reverb engine when GUGS publishes 2.6 guidance
+
+- **Context**: FluidSynth 2.6.0 changed the default `synth.reverb.engine` from
+  FDN to Dattorro and changed `synth.reverb.damp` to 0.2. The GUGS published
+  recipe was tuned on FDN. We pin `synth.reverb.engine=fdn` and `damp=0.3` on
+  runtime >= 2.6 to keep the documented sound.
+- **Location**: `src/synth.rs` (`configure_settings`).
+- **Expected**: Follow
+  [GeneralUser-GS#20](https://github.com/mrbumpy409/GeneralUser-GS/issues/20)
+  when it is answered; only switch engines after an A/B against the GUGS demo
+  MIDIs.
+- **Rationale**: Changing the engine silently changes the product's sound and
+  invalidates the fixed parameter recipe.
+
+### G2. Seek does not restore CC/Program state
+
+- **Context**: `MidiEngine::seek` sends all-notes-off and resumes at the new
+  position; it does not replay the last CC/program snapshot. This pre-existing
+  limitation (C1) also applies to the built-in synth, where a backward seek can
+  leave the previous timbre in place.
+- **Location**: `src/engine.rs` (`seek`), `src/synth.rs` (`Reset` only on new
+  file/stop).
+- **Expected**: Build a channel-state snapshot at load time and replay the state
+  at the seek target.
+- **Rationale**: Audible wrong-instrument playback after seeking; best handled
+  with the state-machine parser work.
+
+### G3. SysEx continuation (`Escape`) is lost
+
+- **Context**: `flatten` handles `TrackEventKind::SysEx` but ignores
+  `TrackEventKind::Escape`. FluidSynth needs complete GS SysEx messages (reset,
+  master volume, effects), so split messages can be dropped.
+- **Location**: `src/engine.rs` (`flatten`, A7 above).
+- **Expected**: Accumulate Escape payloads until F7 and emit one `MidiEvent`.
+- **Rationale**: Some GS files sound wrong without their SysEx setup; covered by
+  the parser state-machine rewrite.
+
+### G4. Android audio focus and background playback policy
+
+- **Context**: `PreludeActivity` pauses the transport and destroys the audio
+  driver on `onPause`, recreating it on `onResume`. There is no `AudioManager`
+  focus request, notification, media session or background service.
+- **Location**: `android/android-java/.../PreludeActivity.java`,
+  `src/application.rs` lifecycle channel.
+- **Expected**: Request audio focus while playing, pause on focus loss, and
+  decide whether background playback needs a foreground service. Keep the
+  default "pause when not visible" until then.
+- **Rationale**: Mixing with other audio and phone calls; a service is a larger
+  product decision.
+
+### G5. Optional suspend-on-idle on desktop
+
+- **Context**: FluidSynth keeps rendering silence while paused/stopped, which
+  keeps PipeWire/PulseAudio and the audio device awake. Android already suspends
+  on background.
+- **Location**: `src/synth.rs` (`SuspendAudio`/`ResumeAudio`).
+- **Expected**: After a generous idle timeout, delete the audio driver; recreate
+  it on the next play. Do not add a user setting.
+- **Rationale**: Battery/CPU on laptops; resume latency must stay acceptable.
+
+### G6. Android lifecycle verification
+
+- **Context**: The JNI bridge and driver suspend/resume are implemented but only
+  build-verified; background/foreground, screen-off, rotation, headset plug and
+  low-memory behavior need device testing.
+- **Location**: `PreludeActivity`, `src/application.rs` tick loop.
+- **Expected**: Run the Android checklist in the release notes on real hardware;
+  add audio-focus handling if needed.
+- **Rationale**: Unverified platform behavior can regress silently.

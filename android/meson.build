@@ -26,6 +26,24 @@ py3 = find_program('python3')
 # Keep this in sync with the directory layout (it used to be two).
 repo_root = meson.project_source_root() / '..'
 
+# GeneralUser GS is installed as ordinary data. Pixiewood copies non-lib
+# install-tree files into APK assets; PreludeActivity materializes the SF2 in
+# app-private storage and Rust loads it by path, exactly like desktop.
+soundfont = custom_target(
+    'generaluser-gs',
+    output: 'GeneralUser-GS.sf2',
+    command: [
+        py3,
+        repo_root / 'build-aux/fetch_soundfont.py',
+        '--output', '@OUTPUT@',
+        '--source-root', repo_root,
+    ],
+    build_by_default: true,
+    install: true,
+    install_dir: get_option('datadir') / 'prelude' / 'soundfonts',
+    install_tag: 'runtime',
+)
+
 # 1. Blueprint ui/*.blp -> build-root/*.ui (host tools, same as desktop).
 window_ui = custom_target(
     'window-ui',
@@ -89,6 +107,7 @@ cargo_build = custom_target(
     input: files(
         '../Cargo.lock',
         '../Cargo.toml',
+        '../build.rs',
         '../src/application.rs',
         '../src/config.rs',
         '../src/engine.rs',
@@ -96,6 +115,8 @@ cargo_build = custom_target(
         '../src/main.rs',
         '../src/midi_view.rs',
         '../src/page_view.rs',
+        '../src/platform.rs',
+        '../src/synth.rs',
     ),
     output: 'libprelude.a',
     depends: gres,
@@ -121,18 +142,47 @@ cargo_build = custom_target(
 
 # 4. Final link: C entry + JNI MIDI bridge + whole Rust staticlib, loaded
 # by the JVM launcher.
+android_sysroot = run_command(
+    'sh',
+    '-c', 'printf %s "$PRELUDE_ANDROID_SYSROOT"',
+    check: true,
+).stdout().strip()
+assert(
+    android_sysroot != '',
+    'PRELUDE_ANDROID_SYSROOT must be set (source android/env.sh)',
+)
+android_libdir = android_sysroot / get_option('libdir')
+
+# FluidSynth, Oboe and libc++ are prebuilt into the Pixiewood sysroot by
+# android/build-fluidsynth.sh. Meson cannot install them as project targets,
+# so copy them next to libprelude.so for Pixiewood's jniLibs symlink.
+meson.add_install_script(
+    'copy_android_libs.py',
+    android_sysroot,
+    get_option('libdir'),
+    repo_root / 'data/licenses',
+    get_option('datadir') / 'prelude' / 'licenses',
+    install_tag: 'runtime',
+)
+
 executable(
     'prelude',
     'src/main.c',
     'src/midi_init.c',
+    'src/platform_init.c',
     dependencies: [gtk_dep, adw_dep],
     # The Rust staticlib leaves NDK native deps unresolved by design (a
     # staticlib is an unlinked archive); the final link supplies them.
     # midir's Android backend needs libamidi (API 29+).
-    # Release profile: build-aux/cargo_build.py derives --release from the
-    # same --profile flag; keep in sync via cargo_profile above.
+    # FluidSynth is a shared library so its own C++/Oboe deps stay packaged
+    # beside it; libc++_shared is also linked explicitly for the C main shim.
     link_args: [
         cargo_target_dir / android_triple / cargo_profile / 'libprelude.a',
+        '-L' + android_libdir,
+        '-Wl,-rpath-link,' + android_libdir,
+        '-Wl,-z,max-page-size=16384',
+        '-lfluidsynth',
+        '-lc++_shared',
         '-lamidi',
     ],
     # Ordering only: the .a above is produced by cargo, opaque to Meson.
