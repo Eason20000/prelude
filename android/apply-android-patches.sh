@@ -48,3 +48,16 @@ else
     sed -i 's|<uses-permission android:name="android.permission.REORDER_TASKS"/>|<uses-permission android:name="android.permission.REORDER_TASKS"/>\n  <uses-feature android:name="android.software.midi" android:required="false"/>|' "$MANIFEST"
     echo "apply-android-patches: uses-feature added"
 fi
+
+# 4. Patch fontconfig test-spacing to include libintl_dep.
+#
+# Upstream fontconfig 2.18+ test-spacing.c includes fcint.h which #include
+# <libintl.h> when ENABLE_NLS, but the meson test entry only declares
+# freetype_dep — missing libintl_dep.  This causes "libintl.h file not found"
+# on cross-compile (Pixiewood Android).  Patch the generated meson.build
+# in-place; idempotent via grep guard.
+FC_TEST="../android/subprojects/fontconfig/test/meson.build"
+if [ -f "$FC_TEST" ] && ! grep -q "test-spacing.*libintl_dep" "$FC_TEST"; then
+    sed -i "s|\['test-spacing\.c', {'include_directories': include_directories('\.\./src'), 'dependencies': freetype_dep}\],|\['test-spacing.c', {'include_directories': include_directories('../src'), 'dependencies': [freetype_dep, libintl_dep]}],|" "$FC_TEST"
+    echo "apply-android-patches: patched fontconfig test-spacing libintl_dep"
+fi

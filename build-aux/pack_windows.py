@@ -81,7 +81,14 @@ def main(argv: list[str]) -> int:
     for dll in dlls:
         shutil.copy(msys / "bin" / Path(dll).name, stage / "bin" / Path(dll).name)
 
+    # Explicitly copy known runtime DLLs that may not appear in ldd output
+    # (e.g. when statically linked or when ldd path format differs).
     required_dlls = ("libfluidsynth-3.dll", "libsndfile-1.dll")
+    for _name in required_dlls:
+        _src = msys / "bin" / _name
+        _dst = stage / "bin" / _name
+        if _src.is_file() and not _dst.is_file():
+            shutil.copy(_src, _dst)
     missing_dlls = [
         name for name in required_dlls
         if not (stage / "bin" / name).is_file()
