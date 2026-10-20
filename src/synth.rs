@@ -361,22 +361,16 @@ impl Worker {
                     fluid_synth_channel_pressure(self.synth, *channel as c_int, *pressure as c_int);
                 }
                 MidiEvent::Sysex(bytes) => {
-                    let mut payload = bytes.as_slice();
-                    if payload.first() == Some(&0xF0) {
-                        payload = &payload[1..];
-                    }
-                    if payload.last() == Some(&0xF7) {
-                        payload = &payload[..payload.len() - 1];
-                    }
-                    if payload.is_empty() {
+                    if bytes.is_empty() {
                         return;
                     }
+                    // FluidSynth expects the full sysex message including 0xF0.
                     let mut response_len = 0;
                     let mut handled = 0;
                     fluid_synth_sysex(
                         self.synth,
-                        payload.as_ptr().cast(),
-                        payload.len() as c_int,
+                        bytes.as_ptr().cast(),
+                        bytes.len() as c_int,
                         ptr::null_mut(),
                         &mut response_len,
                         &mut handled,
