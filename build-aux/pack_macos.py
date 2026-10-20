@@ -8,7 +8,7 @@ template with @BUNDLE_DIR@, iconset/icns, DMG + sha256.
 
 Usage:
     python3 build-aux/pack_macos.py --builddir builddir --source-root . \\
-        --output Prelude-macos-arm64.dmg [--version 0.1.3]
+        --output Prelude-macos-arm64.dmg [--version 0.2.0]
 """
 
 from __future__ import annotations
